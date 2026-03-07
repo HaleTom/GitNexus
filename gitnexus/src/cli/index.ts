@@ -73,34 +73,44 @@ program
   .description('Augment a search pattern with knowledge graph context (used by hooks)')
   .action(createLazyAction(() => import('./augment.js'), 'augmentCommand'));
 
+// ─── Direct Tool Commands (no MCP overhead) ────────────────────────
+// These invoke LocalBackend directly for use in eval, scripts, and CI.
+
 program
-  .command('query <query>')
-  .description('Direct tool call: search codebase by concept/intent (no MCP overhead)')
-  .option('--repo <repo>', 'Repository name or path (optional if only one indexed)')
+  .command('query <search_query>')
+  .description('Search the knowledge graph for execution flows related to a concept')
+  .option('-r, --repo <name>', 'Target repository (omit if only one indexed)')
+  .option('-c, --context <text>', 'Task context to improve ranking')
+  .option('-g, --goal <text>', 'What you want to find')
+  .option('-l, --limit <n>', 'Max processes to return (default: 5)')
+  .option('--content', 'Include full symbol source code')
   .action(createLazyAction(() => import('./tool.js'), 'queryCommand'));
 
 program
-  .command('context <name>')
-  .description('Direct tool call: 360-degree view of a symbol (no MCP overhead)')
-  .option('--uid <uid>', 'Direct symbol UID (zero-ambiguity)')
-  .option('--file-path <path>', 'File path to disambiguate common names')
-  .option('--include-content', 'Include full symbol source content')
-  .option('--repo <repo>', 'Repository name or path (optional if only one indexed)')
+  .command('context [name]')
+  .description('360-degree view of a code symbol: callers, callees, processes')
+  .option('-r, --repo <name>', 'Target repository')
+  .option('-u, --uid <uid>', 'Direct symbol UID (zero-ambiguity lookup)')
+  .option('-f, --file <path>', 'File path to disambiguate common names')
+  .option('--content', 'Include full symbol source code')
   .action(createLazyAction(() => import('./tool.js'), 'contextCommand'));
 
 program
   .command('impact <target>')
-  .description('Direct tool call: blast radius / what breaks if you change X (no MCP overhead)')
-  .option('-d, --direction <dir>', 'Direction: "upstream" (who depends on X) or "downstream" (what X depends on)', 'upstream')
-  .option('--depth <n>', 'Max traversal depth (1-3)', '2')
-  .option('--repo <repo>', 'Repository name or path (optional if only one indexed)')
+  .description('Blast radius analysis: what breaks if you change a symbol')
+  .option('-d, --direction <dir>', 'upstream (dependants) or downstream (dependencies)', 'upstream')
+  .option('-r, --repo <name>', 'Target repository')
+  .option('--depth <n>', 'Max relationship depth (default: 3)')
+  .option('--include-tests', 'Include test files in results')
   .action(createLazyAction(() => import('./tool.js'), 'impactCommand'));
 
 program
   .command('cypher <query>')
-  .description('Direct tool call: run read-only Cypher against the knowledge graph (no MCP overhead)')
-  .option('--repo <repo>', 'Repository name or path (optional if only one indexed)')
+  .description('Execute raw Cypher query against the knowledge graph')
+  .option('-r, --repo <name>', 'Target repository')
   .action(createLazyAction(() => import('./tool.js'), 'cypherCommand'));
+
+// ─── Eval Server (persistent daemon for SWE-bench) ─────────────────
 
 program
   .command('eval-server')
