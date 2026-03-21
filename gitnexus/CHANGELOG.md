@@ -2,6 +2,14 @@
 
 All notable changes to GitNexus will be documented in this file.
 
+## [1.4.8] - 2026-03-21
+
+### Added
+- **Markdown file indexing** — parse `.md`/`.mdx` files to extract Section nodes from headings with hierarchy via CONTAINS edges and cross-file IMPORTS edges from markdown links (#399)
+
+### Fixed
+- **lbug**: register Section in `NODE_TABLES`, `NODE_SCHEMA_QUERIES`, and `getCopyQuery` after kuzu→lbug migration (#401)
+
 ## [1.4.7] - 2026-03-19
 
 ### Added
