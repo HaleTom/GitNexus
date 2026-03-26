@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { TypeScriptFieldExtractor } from '../../src/core/ingestion/field-extractors/typescript.js';
 import type { FieldExtractorContext, ExtractedFields } from '../../src/core/ingestion/field-types.js';
-import type { TypeEnv } from '../../src/core/ingestion/type-env.js';
+import type { TypeEnvironment } from '../../src/core/ingestion/type-env.js';
 import { createSymbolTable } from '../../src/core/ingestion/symbol-table.js';
 import Parser from 'tree-sitter';
 import TypeScript from 'tree-sitter-typescript';
@@ -16,7 +16,13 @@ const parse = (code: string) => {
 
 // Mock context for tests
 const createMockContext = (): FieldExtractorContext => ({
-  typeEnv: new Map() as TypeEnv,
+  typeEnv: {
+    lookup: () => undefined,
+    constructorBindings: [],
+    fileScope: () => new Map(),
+    allScopes: () => new Map(),
+    constructorTypeMap: new Map(),
+  } as TypeEnvironment,
   symbolTable: createSymbolTable(),
   filePath: 'test.ts',
   language: SupportedLanguages.TypeScript,

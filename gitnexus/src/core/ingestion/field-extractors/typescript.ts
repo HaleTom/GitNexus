@@ -1,10 +1,9 @@
 // gitnexus/src/core/ingestion/field-extractors/typescript.ts
 
-import type { SyntaxNode } from '../utils.js';
+import type { SyntaxNode } from '../utils/ast-helpers.js';
 import { SupportedLanguages } from '../../../config/supported-languages.js';
 import { BaseFieldExtractor } from '../field-extractor.js';
 import type { FieldExtractorContext, ExtractedFields, FieldInfo } from '../field-types.js';
-import { extractSimpleTypeName } from '../type-extractors/shared.js';
 
 /**
  * TypeScript field extractor for class and interface declarations.

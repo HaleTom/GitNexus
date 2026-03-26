@@ -1,6 +1,6 @@
 // gitnexus/src/core/ingestion/field-extractor.ts
 
-import type { SyntaxNode } from './utils.js';
+import type { SyntaxNode } from './utils/ast-helpers.js';
 import { SupportedLanguages } from '../../config/supported-languages.js';
 import type { 
   FieldExtractorContext, 
@@ -62,11 +62,9 @@ export abstract class BaseFieldExtractor implements FieldExtractor {
     const { typeEnv, symbolTable, filePath } = context;
     
     // Try to find in type environment (check file scope first)
-    const fileEnv = typeEnv.get('');
-    if (fileEnv) {
-      const local = fileEnv.get(typeName);
-      if (local) return local;
-    }
+    const fileEnv = typeEnv.fileScope();
+    const local = fileEnv.get(typeName);
+    if (local) return local;
     
     // Try symbol table lookup in current file
     const symbols = symbolTable.lookupExactAll(filePath, typeName);
