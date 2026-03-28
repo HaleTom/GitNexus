@@ -33,7 +33,7 @@ export interface MethodExtractorContext {
 }
 
 export interface ExtractedMethods {
-  ownerFqn: string;
+  ownerName: string;
   methods: MethodInfo[];
 }
 

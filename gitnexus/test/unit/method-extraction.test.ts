@@ -81,7 +81,7 @@ describe('Java MethodExtractor', () => {
       const result = extractor.extract(classNode, javaCtx);
 
       expect(result).not.toBeNull();
-      expect(result!.ownerFqn).toBe('UserService');
+      expect(result!.ownerName).toBe('UserService');
       expect(result!.methods).toHaveLength(1);
 
       const m = result!.methods[0];
@@ -288,6 +288,26 @@ describe('Java MethodExtractor', () => {
       expect(sg).toBeDefined();
       expect(sg!.returnType).toBe('double');
     });
+
+    it('extracts methods from enum constant anonymous class bodies', () => {
+      const tree = parseJava(`
+        public enum Operation {
+          PLUS {
+            public double apply(double x, double y) { return x + y; }
+          };
+          public abstract double apply(double x, double y);
+        }
+      `);
+      const classNode = tree.rootNode.child(0)!;
+      const result = extractor.extract(classNode, javaCtx);
+
+      const applies = result!.methods.filter((m) => m.name === 'apply');
+      expect(applies).toHaveLength(2);
+      const abstractApply = applies.find((m) => m.isAbstract);
+      const concreteApply = applies.find((m) => !m.isAbstract);
+      expect(abstractApply).toBeDefined();
+      expect(concreteApply).toBeDefined();
+    });
   });
 
   describe('extract from annotation type', () => {
@@ -302,7 +322,7 @@ describe('Java MethodExtractor', () => {
       const result = extractor.extract(classNode, javaCtx);
 
       expect(result).not.toBeNull();
-      expect(result!.ownerFqn).toBe('MyAnnotation');
+      expect(result!.ownerName).toBe('MyAnnotation');
       expect(result!.methods).toHaveLength(2);
       expect(result!.methods.map((m) => m.name).sort()).toEqual(['count', 'value']);
     });
@@ -382,7 +402,7 @@ describeKotlin('Kotlin MethodExtractor', () => {
       const result = extractor.extract(classNode, kotlinCtx);
 
       expect(result).not.toBeNull();
-      expect(result!.ownerFqn).toBe('UserService');
+      expect(result!.ownerName).toBe('UserService');
       expect(result!.methods).toHaveLength(1);
 
       const m = result!.methods[0];
@@ -476,6 +496,100 @@ describeKotlin('Kotlin MethodExtractor', () => {
       const result = extractor.extract(classNode, kotlinCtx);
 
       expect(result!.methods[0].visibility).toBe('public');
+    });
+  });
+
+  describe('isFinal semantics', () => {
+    it('regular methods are final by default', () => {
+      const tree = parseKotlin(`
+        class Foo {
+          fun bar() { }
+        }
+      `);
+      const classNode = tree.rootNode.child(0)!;
+      const result = extractor.extract(classNode, kotlinCtx);
+
+      expect(result!.methods[0].isFinal).toBe(true);
+    });
+
+    it('open methods are not final', () => {
+      const tree = parseKotlin(`
+        open class Foo {
+          open fun bar() { }
+        }
+      `);
+      const classNode = tree.rootNode.child(0)!;
+      const result = extractor.extract(classNode, kotlinCtx);
+
+      expect(result!.methods[0].isFinal).toBe(false);
+    });
+
+    it('abstract methods are not final', () => {
+      const tree = parseKotlin(`
+        abstract class Foo {
+          abstract fun bar(): Int
+        }
+      `);
+      const classNode = tree.rootNode.child(0)!;
+      const result = extractor.extract(classNode, kotlinCtx);
+
+      expect(result!.methods[0].isFinal).toBe(false);
+      expect(result!.methods[0].isAbstract).toBe(true);
+    });
+
+    it('interface methods are not final (domain invariant)', () => {
+      const tree = parseKotlin(`
+        interface Foo {
+          fun bar(): Int
+        }
+      `);
+      const classNode = tree.rootNode.child(0)!;
+      const result = extractor.extract(classNode, kotlinCtx);
+
+      expect(result!.methods[0].isAbstract).toBe(true);
+      expect(result!.methods[0].isFinal).toBe(false);
+    });
+  });
+
+  describe('companion object', () => {
+    it('extracts methods from companion object', () => {
+      const tree = parseKotlin(`
+        class UserService {
+          companion object {
+            fun create(): UserService = UserService()
+          }
+        }
+      `);
+      // companion_object is inside class_body
+      const classNode = tree.rootNode.child(0)!;
+      const classBody = classNode.namedChild(1)!;
+      const companion = classBody.namedChild(0)!;
+      const result = extractor.extract(companion, kotlinCtx);
+
+      expect(result).not.toBeNull();
+      expect(result!.ownerName).toBe('Companion');
+      expect(result!.methods).toHaveLength(1);
+      expect(result!.methods[0].name).toBe('create');
+      expect(result!.methods[0].isStatic).toBe(true);
+    });
+
+    it('extracts methods from named companion object', () => {
+      const tree = parseKotlin(`
+        class Foo {
+          companion object Factory {
+            fun build(): Foo = Foo()
+          }
+        }
+      `);
+      const classNode = tree.rootNode.child(0)!;
+      const classBody = classNode.namedChild(1)!;
+      const companion = classBody.namedChild(0)!;
+      const result = extractor.extract(companion, kotlinCtx);
+
+      expect(result).not.toBeNull();
+      expect(result!.ownerName).toBe('Factory');
+      expect(result!.methods[0].name).toBe('build');
+      expect(result!.methods[0].isStatic).toBe(true);
     });
   });
 });

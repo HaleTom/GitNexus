@@ -6,7 +6,7 @@ import type {
   ParameterInfo,
   MethodVisibility,
 } from '../../method-types.js';
-import { findVisibility, hasKeyword, hasModifier } from '../../field-extractors/configs/helpers.js';
+import { findVisibility, hasModifier } from '../../field-extractors/configs/helpers.js';
 import { extractSimpleTypeName } from '../../type-extractors/shared.js';
 import type { SyntaxNode } from '../../utils/ast-helpers.js';
 
@@ -135,11 +135,11 @@ export const javaMethodConfig: MethodExtractionConfig = {
   },
 
   isStatic(node) {
-    return hasKeyword(node, 'static') || hasModifier(node, 'modifiers', 'static');
+    return hasModifier(node, 'modifiers', 'static');
   },
 
   isAbstract(node, ownerNode) {
-    if (hasKeyword(node, 'abstract') || hasModifier(node, 'modifiers', 'abstract')) return true;
+    if (hasModifier(node, 'modifiers', 'abstract')) return true;
     // Interface methods are implicitly abstract unless they have a body (default methods)
     if (INTERFACE_OWNER_TYPES.has(ownerNode.type)) {
       const body = node.childForFieldName('body');
@@ -149,7 +149,7 @@ export const javaMethodConfig: MethodExtractionConfig = {
   },
 
   isFinal(node) {
-    return hasKeyword(node, 'final') || hasModifier(node, 'modifiers', 'final');
+    return hasModifier(node, 'modifiers', 'final');
   },
 
   extractAnnotations(node) {
@@ -254,7 +254,7 @@ function extractKotlinReturnType(node: SyntaxNode): string | undefined {
 
 export const kotlinMethodConfig: MethodExtractionConfig = {
   language: SupportedLanguages.Kotlin,
-  typeDeclarationNodes: ['class_declaration', 'object_declaration'],
+  typeDeclarationNodes: ['class_declaration', 'object_declaration', 'companion_object'],
   methodNodeTypes: ['function_declaration'],
   bodyNodeTypes: ['class_body'],
   extractName(node) {
@@ -304,8 +304,11 @@ export const kotlinMethodConfig: MethodExtractionConfig = {
   },
 
   isFinal(node) {
-    // Kotlin functions are final by default (unless `open`), but we only flag explicit `final`
-    return hasModifier(node, 'modifiers', 'final');
+    // Kotlin functions are closed (final) by default — only open/abstract/override makes them overridable
+    if (hasModifier(node, 'modifiers', 'open')) return false;
+    if (hasModifier(node, 'modifiers', 'abstract')) return false;
+    if (hasModifier(node, 'modifiers', 'override')) return false;
+    return true;
   },
 
   extractAnnotations(node) {

@@ -16,6 +16,9 @@ import type {
   MethodInfo,
 } from '../method-types.js';
 
+/** Owner node types where member functions are effectively static (JVM semantics). */
+const STATIC_OWNER_TYPES = new Set(['companion_object', 'object_declaration']);
+
 /**
  * Create a MethodExtractor from a declarative config.
  */
@@ -34,30 +37,33 @@ export function createMethodExtractor(config: MethodExtractionConfig): MethodExt
     extract(node: SyntaxNode, context: MethodExtractorContext): ExtractedMethods | null {
       if (!typeDeclarationSet.has(node.type)) return null;
 
-      // Try field-based name first, then walk children for type_identifier
-      // (Kotlin class_declaration has no 'name' field — the type_identifier is a direct child)
-      let ownerFqn: string | undefined;
+      // Resolve owner name: field-based → type_identifier → simple_identifier → "Companion"
+      let ownerName: string | undefined;
       const nameField = node.childForFieldName('name');
       if (nameField) {
-        ownerFqn = nameField.text;
+        ownerName = nameField.text;
       } else {
         for (let i = 0; i < node.namedChildCount; i++) {
           const child = node.namedChild(i);
-          if (child && child.type === 'type_identifier') {
-            ownerFqn = child.text;
+          if (child && (child.type === 'type_identifier' || child.type === 'simple_identifier')) {
+            ownerName = child.text;
             break;
           }
         }
       }
-      if (!ownerFqn) return null;
-      const methods: MethodInfo[] = [];
+      // Unnamed companion objects use "Companion" (Kotlin convention)
+      if (!ownerName && node.type === 'companion_object') {
+        ownerName = 'Companion';
+      }
+      if (!ownerName) return null;
 
+      const methods: MethodInfo[] = [];
       const bodies = findBodies(node, bodyNodeSet);
       for (const body of bodies) {
         extractMethodsFromBody(body, node, context, config, methodNodeSet, methods);
       }
 
-      return { ownerFqn, methods };
+      return { ownerName, methods };
     },
   };
 }
@@ -67,7 +73,6 @@ function findBodies(node: SyntaxNode, bodyNodeSet: Set<string>): SyntaxNode[] {
   const bodyField = node.childForFieldName('body');
   if (bodyField && bodyNodeSet.has(bodyField.type)) {
     result.push(bodyField);
-    // Also check nested body containers (e.g., enum_body > enum_body_declarations)
     addNestedBodies(bodyField, bodyNodeSet, result);
     return result;
   }
@@ -109,6 +114,16 @@ function extractMethodsFromBody(
       const method = buildMethod(child, ownerNode, context, config);
       if (method) out.push(method);
     }
+
+    // Recurse into enum constant anonymous class bodies
+    if (child.type === 'enum_constant') {
+      for (let j = 0; j < child.namedChildCount; j++) {
+        const innerBody = child.namedChild(j);
+        if (innerBody && innerBody.type === 'class_body') {
+          extractMethodsFromBody(innerBody, ownerNode, context, config, methodNodeSet, out);
+        }
+      }
+    }
   }
 }
 
@@ -121,14 +136,22 @@ function buildMethod(
   const name = config.extractName(node);
   if (!name) return null;
 
+  const isAbstract = config.isAbstract(node, ownerNode);
+  let isFinal = config.isFinal(node);
+  // Domain invariant: abstract methods cannot be final
+  if (isAbstract) isFinal = false;
+
+  // companion_object / object_declaration members are effectively static on JVM
+  const isStatic = STATIC_OWNER_TYPES.has(ownerNode.type) || config.isStatic(node);
+
   return {
     name,
     returnType: config.extractReturnType(node) ?? null,
     parameters: config.extractParameters(node),
     visibility: config.extractVisibility(node),
-    isStatic: config.isStatic(node),
-    isAbstract: config.isAbstract(node, ownerNode),
-    isFinal: config.isFinal(node),
+    isStatic,
+    isAbstract,
+    isFinal,
     annotations: config.extractAnnotations?.(node) ?? [],
     sourceFile: context.filePath,
     line: node.startPosition.row + 1,
