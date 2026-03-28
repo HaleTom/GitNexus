@@ -243,3 +243,40 @@ describe('callLLM — Azure content_filter error', () => {
     })).rejects.toThrow('LLM API error (400)');
   });
 });
+
+describe('readSSEStream — content_filter handling', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('throws a clear error when finish_reason is content_filter', async () => {
+    const streamContent = [
+      'data: {"choices":[{"delta":{"content":"partial "},"finish_reason":null}]}\n\n',
+      'data: {"choices":[{"delta":{},"finish_reason":"content_filter"}]}\n\n',
+      'data: [DONE]\n\n',
+    ].join('');
+
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(streamContent));
+        controller.close();
+      },
+    });
+
+    const fetchSpy = vi.fn().mockResolvedValue(new Response(stream, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const { callLLM } = await import('../../src/core/wiki/llm-client.js');
+
+    await expect(callLLM('test', {
+      apiKey: 'azure-key',
+      baseUrl: 'https://myres.openai.azure.com/openai/v1',
+      model: 'gpt-4o',
+      maxTokens: 100,
+      temperature: 0,
+      provider: 'azure',
+    }, undefined, { onChunk: () => {} })).rejects.toThrow('content filter');
+  });
+});

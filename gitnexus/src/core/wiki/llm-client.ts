@@ -248,6 +248,7 @@ async function readSSEStream(
   const reader = body.getReader();
   let content = '';
   let buffer = '';
+  let contentFilterTriggered = false;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -265,7 +266,14 @@ async function readSSEStream(
 
       try {
         const parsed = JSON.parse(data);
-        const delta = parsed.choices?.[0]?.delta?.content;
+        const choice = parsed.choices?.[0];
+
+        // Detect Azure content filter finish reason
+        if (choice?.finish_reason === 'content_filter') {
+          contentFilterTriggered = true;
+        }
+
+        const delta = choice?.delta?.content;
         if (delta) {
           content += delta;
           onChunk(content.length);
@@ -274,6 +282,10 @@ async function readSSEStream(
         // Skip malformed SSE chunks
       }
     }
+  }
+
+  if (contentFilterTriggered) {
+    throw new Error('Azure content filter blocked the response mid-stream. The generated content triggered content policy. Adjust your prompt and retry.');
   }
 
   if (!content) {
