@@ -7,7 +7,7 @@
  * Config priority: CLI flags > env vars > defaults
  */
 
-export type LLMProvider = 'openai' | 'cursor';
+export type LLMProvider = 'openai' | 'openrouter' | 'azure' | 'custom' | 'cursor';
 
 export interface LLMConfig {
   apiKey: string;
@@ -53,6 +53,7 @@ export async function resolveLLMConfig(overrides?: Partial<LLMConfig>): Promise<
       || 'https://openrouter.ai/api/v1',
     model: overrides?.model
       || process.env.GITNEXUS_MODEL
+      || (savedConfig.provider === 'cursor' ? savedConfig.cursorModel : undefined)
       || savedConfig.model
       || 'minimax/minimax-m2.5',
     maxTokens: overrides?.maxTokens ?? 16_384,
@@ -86,7 +87,7 @@ export function isAzureProvider(baseUrl: string): boolean {
  */
 export function isReasoningModel(model: string, override?: boolean): boolean {
   if (override !== undefined) return override;
-  return /^o[1-9](-mini|-preview)?$|^o[1-9]$|^o\d+-mini$/i.test(model);
+  return /^o[1-9](-mini|-preview)?$|^o\d+-mini$/i.test(model);
 }
 
 /**
