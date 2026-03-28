@@ -146,7 +146,7 @@ export const wikiCommand = async (
 
   const savedConfig = await loadCLIConfig();
   const hasSavedConfig = !!(savedConfig.provider === 'cursor' || (savedConfig.apiKey && savedConfig.baseUrl));
-  const hasCLIOverrides = !!(options?.apiKey || options?.model || options?.baseUrl || options?.provider);
+  const hasCLIOverrides = !!(options?.apiKey || options?.model || options?.baseUrl || options?.provider || options?.apiVersion || options?.reasoningModel !== undefined);
 
   let llmConfig = await resolveLLMConfig({
     model: options?.model,
