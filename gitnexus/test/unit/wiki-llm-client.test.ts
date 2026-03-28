@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 // Import the function we'll add in the next step
 import { isAzureProvider, isReasoningModel, buildRequestUrl } from '../../src/core/wiki/llm-client.js';
@@ -73,5 +73,130 @@ describe('buildRequestUrl', () => {
     expect(buildRequestUrl('https://myres.openai.azure.com/openai/v1', undefined)).toBe(
       'https://myres.openai.azure.com/openai/v1/chat/completions'
     );
+  });
+});
+
+describe('callLLM — auth header', () => {
+  it('uses Authorization: Bearer for non-Azure endpoints', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ choices: [{ message: { content: 'hello' } }], usage: {} }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    ));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const { callLLM } = await import('../../src/core/wiki/llm-client.js');
+    await callLLM('test', {
+      apiKey: 'sk-test',
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'gpt-4o',
+      maxTokens: 100,
+      temperature: 0,
+    });
+
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit & { headers: Record<string, string> }];
+    expect(init.headers['Authorization']).toBe('Bearer sk-test');
+    expect((init.headers as any)['api-key']).toBeUndefined();
+
+    vi.unstubAllGlobals();
+  });
+
+  it('uses api-key header for Azure endpoints', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ choices: [{ message: { content: 'hello' } }], usage: {} }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    ));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const { callLLM } = await import('../../src/core/wiki/llm-client.js');
+    await callLLM('test', {
+      apiKey: 'azure-key-123',
+      baseUrl: 'https://myres.openai.azure.com/openai/deployments/my-dep',
+      model: 'my-dep',
+      maxTokens: 100,
+      temperature: 0,
+      provider: 'azure',
+      apiVersion: '2024-10-21',
+    });
+
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit & { headers: Record<string, string> }];
+    expect(url).toContain('?api-version=2024-10-21');
+    expect((init.headers as any)['api-key']).toBe('azure-key-123');
+    expect(init.headers['Authorization']).toBeUndefined();
+
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('callLLM — reasoning model params', () => {
+  it('uses max_completion_tokens and strips temperature for reasoning models', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ choices: [{ message: { content: 'answer' } }], usage: {} }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    ));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const { callLLM } = await import('../../src/core/wiki/llm-client.js');
+    await callLLM('test', {
+      apiKey: 'sk-test',
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'o3-mini',
+      maxTokens: 500,
+      temperature: 0,
+    });
+
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit & { headers: Record<string, string> }];
+    const body = JSON.parse(init.body as string);
+    expect(body.max_completion_tokens).toBe(500);
+    expect(body.max_tokens).toBeUndefined();
+    expect(body.temperature).toBeUndefined();
+
+    vi.unstubAllGlobals();
+  });
+
+  it('uses max_tokens and temperature for non-reasoning models', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ choices: [{ message: { content: 'answer' } }], usage: {} }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    ));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const { callLLM } = await import('../../src/core/wiki/llm-client.js');
+    await callLLM('test', {
+      apiKey: 'sk-test',
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'gpt-4o',
+      maxTokens: 500,
+      temperature: 0.5,
+    });
+
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit & { headers: Record<string, string> }];
+    const body = JSON.parse(init.body as string);
+    expect(body.max_tokens).toBe(500);
+    expect(body.max_completion_tokens).toBeUndefined();
+    expect(body.temperature).toBe(0.5);
+
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('callLLM — Azure content_filter error', () => {
+  it('throws a clear error when Azure returns content_filter 400', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ error: { code: 'content_filter', message: 'Prompt triggered policy' } }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } }
+    ));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const { callLLM } = await import('../../src/core/wiki/llm-client.js');
+    await expect(callLLM('test', {
+      apiKey: 'azure-key',
+      baseUrl: 'https://myres.openai.azure.com/openai/v1',
+      model: 'gpt-4o',
+      maxTokens: 100,
+      temperature: 0,
+      provider: 'azure',
+    })).rejects.toThrow('content filter');
+
+    vi.unstubAllGlobals();
   });
 });

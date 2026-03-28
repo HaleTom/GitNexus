@@ -119,16 +119,35 @@ export async function callLLM(
   }
   messages.push({ role: 'user', content: prompt });
 
-  const url = `${config.baseUrl.replace(/\/+$/, '')}/chat/completions`;
+  // Detect Azure endpoint (by provider field or URL pattern)
+  const azure = config.provider === 'azure' || isAzureProvider(config.baseUrl);
+
+  // Detect reasoning model (o1, o3, o4-mini etc.) or explicit override
+  const reasoning = isReasoningModel(config.model, config.isReasoningModel);
+
+  const url = buildRequestUrl(config.baseUrl, azure ? config.apiVersion : undefined);
   const useStream = !!options?.onChunk;
 
+  // Build request body — reasoning models reject temperature and use max_completion_tokens
   const body: Record<string, unknown> = {
     model: config.model,
     messages,
-    max_tokens: config.maxTokens,
-    temperature: config.temperature,
   };
+
+  if (reasoning) {
+    body.max_completion_tokens = config.maxTokens;
+    // Do NOT include temperature, top_p, presence_penalty, frequency_penalty
+  } else {
+    body.max_tokens = config.maxTokens;
+    body.temperature = config.temperature;
+  }
+
   if (useStream) body.stream = true;
+
+  // Build auth headers — Azure uses api-key header, everyone else uses Authorization: Bearer
+  const authHeaders: Record<string, string> = azure
+    ? { 'api-key': config.apiKey }
+    : { 'Authorization': `Bearer ${config.apiKey}` };
 
   const MAX_RETRIES = 3;
   let lastError: Error | null = null;
@@ -139,13 +158,18 @@ export async function callLLM(
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${config.apiKey}`,
+          ...authHeaders,
         },
         body: JSON.stringify(body),
       });
 
       if (!response.ok) {
         const errorText = await response.text().catch(() => 'unknown error');
+
+        // Azure content filter — surface a clear message instead of a generic API error
+        if (response.status === 400 && errorText.includes('content_filter')) {
+          throw new Error(`Azure content filter blocked this request. The prompt triggered content policy. Details: ${errorText.slice(0, 300)}`);
+        }
 
         // Rate limit — wait with exponential backoff and retry
         if (response.status === 429 && attempt < MAX_RETRIES - 1) {
