@@ -479,6 +479,9 @@ function emitMethodImplementsEdges(
     const classNode = graph.getNode(classId);
     if (!classNode) continue;
 
+    // Interfaces and traits declare contracts — they don't implement them
+    if (classNode.label === 'Interface' || classNode.label === 'Trait') continue;
+
     // Get this class's own methods
     const ownMethodIds = methodMap.get(classId) ?? [];
 
@@ -490,6 +493,8 @@ function emitMethodImplementsEdges(
     for (const methodId of ownMethodIds) {
       const methodNode = graph.getNode(methodId);
       if (!methodNode || methodNode.label === 'Property') continue;
+      // Abstract methods don't satisfy interface contracts
+      if (methodNode.properties.isAbstract === true) continue;
       const name = methodNode.properties.name as string;
       const parameterTypes = (methodNode.properties.parameterTypes as string[] | undefined) ?? [];
       const parameterCount = methodNode.properties.parameterCount as number | undefined;
@@ -632,48 +637,58 @@ function findInheritedMethod(
     }
   }
 
-  // Collect all matches across the full BFS, then check for ambiguity.
-  // If the same methodId is reachable via multiple paths (diamond), it's not
-  // ambiguous. Only distinct methodIds count as separate matches.
-  const matches = new Map<string, { methodId: string; parameterTypes: string[] }>();
+  // Level-order BFS: process all ancestors at the current depth before
+  // advancing. Once any match is found at depth D, finish that depth and stop.
+  // Diamond dedup: same methodId via two paths at the same depth = 1 match.
+  let currentLevel = [...queue];
 
-  while (queue.length > 0) {
-    const ancestorId = queue.shift()!;
-    if (visited.has(ancestorId)) continue;
-    visited.add(ancestorId);
+  while (currentLevel.length > 0) {
+    const matches = new Map<string, { methodId: string; parameterTypes: string[] }>();
+    const nextLevel: string[] = [];
 
-    // Check this ancestor's methods
-    const methods = methodMap.get(ancestorId) ?? [];
-    for (const mid of methods) {
-      const mNode = graph.getNode(mid);
-      if (!mNode || mNode.label === 'Property') continue;
-      if (mNode.properties.name !== methodName) continue;
+    for (const ancestorId of currentLevel) {
+      if (visited.has(ancestorId)) continue;
+      visited.add(ancestorId);
 
-      const mParamTypes = (mNode.properties.parameterTypes as string[] | undefined) ?? [];
-      const mParamCount = mNode.properties.parameterCount as number | undefined;
-      if (parameterTypesMatch(mParamTypes, targetParamTypes, mParamCount, targetParamCount)) {
-        matches.set(mid, { methodId: mid, parameterTypes: mParamTypes });
+      // Check this ancestor's methods
+      const methods = methodMap.get(ancestorId) ?? [];
+      for (const mid of methods) {
+        const mNode = graph.getNode(mid);
+        if (!mNode || mNode.label === 'Property') continue;
+        // Abstract inherited methods don't count as concrete implementations
+        if (mNode.properties.isAbstract === true) continue;
+        if (mNode.properties.name !== methodName) continue;
+
+        const mParamTypes = (mNode.properties.parameterTypes as string[] | undefined) ?? [];
+        const mParamCount = mNode.properties.parameterCount as number | undefined;
+        if (parameterTypesMatch(mParamTypes, targetParamTypes, mParamCount, targetParamCount)) {
+          matches.set(mid, { methodId: mid, parameterTypes: mParamTypes });
+        }
       }
-    }
 
-    // Continue walking EXTENDS parents of this ancestor
-    const grandparents = parentMap.get(ancestorId) ?? [];
-    const ancestorEdges = parentEdgeType.get(ancestorId);
-    for (const gp of grandparents) {
-      if (visited.has(gp)) continue;
-      const gpEdge = ancestorEdges?.get(gp);
-      if (gpEdge === 'EXTENDS') {
-        const gpNode = graph.getNode(gp);
-        if (gpNode && gpNode.label !== 'Interface' && gpNode.label !== 'Trait') {
-          queue.push(gp);
+      // Collect EXTENDS parents for the next depth level
+      const grandparents = parentMap.get(ancestorId) ?? [];
+      const ancestorEdges = parentEdgeType.get(ancestorId);
+      for (const gp of grandparents) {
+        if (visited.has(gp)) continue;
+        const gpEdge = ancestorEdges?.get(gp);
+        if (gpEdge === 'EXTENDS') {
+          const gpNode = graph.getNode(gp);
+          if (gpNode && gpNode.label !== 'Interface' && gpNode.label !== 'Trait') {
+            nextLevel.push(gp);
+          }
         }
       }
     }
+
+    // If any matches found at this depth, decide and stop
+    if (matches.size === 1) return matches.values().next().value!;
+    if (matches.size > 1) return null; // ambiguous at same depth
+
+    currentLevel = nextLevel;
   }
 
-  // Ambiguous: 2+ distinct methods from different ancestors
-  if (matches.size === 1) return matches.values().next().value!;
-  return null; // 0 matches or ambiguous (2+)
+  return null; // no matches found
 }
 
 /**

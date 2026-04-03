@@ -1920,11 +1920,27 @@ export class LocalBackend {
     const rawRelTypes =
       mappedRelTypes && mappedRelTypes.length > 0
         ? mappedRelTypes.filter((t: string) => VALID_RELATION_TYPES.has(t))
-        : ['CALLS', 'IMPORTS', 'EXTENDS', 'IMPLEMENTS', 'METHOD_OVERRIDES', 'METHOD_IMPLEMENTS'];
+        : [
+            'CALLS',
+            'IMPORTS',
+            'EXTENDS',
+            'IMPLEMENTS',
+            'METHOD_OVERRIDES',
+            'OVERRIDES',
+            'METHOD_IMPLEMENTS',
+          ];
     const relationTypes =
       rawRelTypes.length > 0
         ? rawRelTypes
-        : ['CALLS', 'IMPORTS', 'EXTENDS', 'IMPLEMENTS', 'METHOD_OVERRIDES', 'METHOD_IMPLEMENTS'];
+        : [
+            'CALLS',
+            'IMPORTS',
+            'EXTENDS',
+            'IMPLEMENTS',
+            'METHOD_OVERRIDES',
+            'OVERRIDES',
+            'METHOD_IMPLEMENTS',
+          ];
     const includeTests = params.includeTests ?? false;
     const minConfidence = params.minConfidence ?? 0;
 
@@ -2474,11 +2490,27 @@ export class LocalBackend {
     const rawRelTypes =
       mappedRelTypes && mappedRelTypes.length > 0
         ? mappedRelTypes.filter((t: string) => VALID_RELATION_TYPES.has(t))
-        : ['CALLS', 'IMPORTS', 'EXTENDS', 'IMPLEMENTS', 'METHOD_OVERRIDES', 'METHOD_IMPLEMENTS'];
+        : [
+            'CALLS',
+            'IMPORTS',
+            'EXTENDS',
+            'IMPLEMENTS',
+            'METHOD_OVERRIDES',
+            'OVERRIDES',
+            'METHOD_IMPLEMENTS',
+          ];
     const relationTypes =
       rawRelTypes.length > 0
         ? rawRelTypes
-        : ['CALLS', 'IMPORTS', 'EXTENDS', 'IMPLEMENTS', 'METHOD_OVERRIDES', 'METHOD_IMPLEMENTS'];
+        : [
+            'CALLS',
+            'IMPORTS',
+            'EXTENDS',
+            'IMPLEMENTS',
+            'METHOD_OVERRIDES',
+            'OVERRIDES',
+            'METHOD_IMPLEMENTS',
+          ];
 
     try {
       return await this._runImpactBFS(repo, sym, symType, dir, {

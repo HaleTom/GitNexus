@@ -1139,5 +1139,127 @@ describe('computeMRO', () => {
       const fooEdge = mi.find((e) => e.sourceId === gbFoo);
       expect(fooEdge).toBeDefined();
     });
+
+    it('C extends B extends A, B and A both have foo → returns B.foo (nearest)', () => {
+      // I { foo() }, A { foo() }, B extends A { foo() }, C extends B implements I { no foo }
+      const graph = createKnowledgeGraph();
+      addClass(graph, 'I', 'java', 'Interface');
+      addClass(graph, 'A', 'java');
+      addClass(graph, 'B', 'java');
+      addClass(graph, 'C', 'java');
+      addImplements(graph, 'C', 'I');
+      addExtends(graph, 'C', 'B');
+      addExtends(graph, 'B', 'A');
+      addMethod(graph, 'I', 'foo', 'Interface');
+      addMethod(graph, 'A', 'foo');
+      const bFoo = addMethod(graph, 'B', 'foo');
+      // C has NO own foo — nearest is B.foo at depth 1
+
+      computeMRO(graph);
+      const mi = graph.relationships.filter((r) => r.type === 'METHOD_IMPLEMENTS');
+      const fooEdge = mi.find((e) => e.sourceId === bFoo);
+      expect(fooEdge).toBeDefined();
+      // A.foo should NOT be reached
+      const aFooId = generateId('Method', 'A.foo');
+      const aFooEdge = mi.find((e) => e.sourceId === aFooId);
+      expect(aFooEdge).toBeUndefined();
+    });
+
+    it('C extends B extends A, only A has foo → returns A.foo (single match at depth 2)', () => {
+      // I { foo() }, A { foo() }, B extends A { no foo }, C extends B implements I { no foo }
+      const graph = createKnowledgeGraph();
+      addClass(graph, 'I', 'java', 'Interface');
+      addClass(graph, 'A', 'java');
+      addClass(graph, 'B', 'java');
+      addClass(graph, 'C', 'java');
+      addImplements(graph, 'C', 'I');
+      addExtends(graph, 'C', 'B');
+      addExtends(graph, 'B', 'A');
+      addMethod(graph, 'I', 'foo', 'Interface');
+      const aFoo = addMethod(graph, 'A', 'foo');
+      // B has NO foo, C has NO foo — only A.foo at depth 2
+
+      computeMRO(graph);
+      const mi = graph.relationships.filter((r) => r.type === 'METHOD_IMPLEMENTS');
+      const fooEdge = mi.find((e) => e.sourceId === aFoo);
+      expect(fooEdge).toBeDefined();
+    });
+  });
+
+  // ---- METHOD_IMPLEMENTS concrete-source guard ----------------------------
+  describe('METHOD_IMPLEMENTS concrete-source guard', () => {
+    it('interface B extends interface A, B redeclares foo → 0 METHOD_IMPLEMENTS', () => {
+      const graph = createKnowledgeGraph();
+      addClass(graph, 'A', 'java', 'Interface');
+      addClass(graph, 'B', 'java', 'Interface');
+      addInterfaceExtends(graph, 'B', 'A');
+      addMethod(graph, 'A', 'foo', 'Interface');
+      addMethod(graph, 'B', 'foo', 'Interface');
+
+      computeMRO(graph);
+
+      const mi = graph.relationships.filter((r) => r.type === 'METHOD_IMPLEMENTS');
+      expect(mi).toHaveLength(0);
+    });
+
+    it('abstract class C implements I, C has abstract foo → 0 METHOD_IMPLEMENTS for foo', () => {
+      const graph = createKnowledgeGraph();
+      addClass(graph, 'I', 'java', 'Interface');
+      addClass(graph, 'C', 'java', 'Class');
+      addImplements(graph, 'C', 'I');
+      addMethod(graph, 'I', 'foo', 'Interface');
+
+      // Add abstract method manually with isAbstract flag
+      const classId = generateId('Class', 'C');
+      const methodId = generateId('Method', 'C.foo');
+      graph.addNode({
+        id: methodId,
+        label: 'Method',
+        properties: { name: 'foo', filePath: 'src/C.ts', isAbstract: true },
+      });
+      graph.addRelationship({
+        id: generateId('HAS_METHOD', `${classId}->${methodId}`),
+        sourceId: classId,
+        targetId: methodId,
+        type: 'HAS_METHOD',
+        confidence: 1.0,
+        reason: '',
+      });
+
+      computeMRO(graph);
+
+      const mi = graph.relationships.filter((r) => r.type === 'METHOD_IMPLEMENTS');
+      expect(mi).toHaveLength(0);
+    });
+
+    it('abstract class C implements I, C has concrete bar → 1 METHOD_IMPLEMENTS for bar', () => {
+      const graph = createKnowledgeGraph();
+      addClass(graph, 'I', 'java', 'Interface');
+      addClass(graph, 'C', 'java', 'Class');
+      addImplements(graph, 'C', 'I');
+      addMethod(graph, 'I', 'bar', 'Interface');
+      const cBar = addMethod(graph, 'C', 'bar');
+
+      computeMRO(graph);
+
+      const mi = graph.relationships.filter((r) => r.type === 'METHOD_IMPLEMENTS');
+      expect(mi).toHaveLength(1);
+      expect(mi[0].sourceId).toBe(cBar);
+    });
+
+    it('concrete class implements interface → 1 METHOD_IMPLEMENTS (regression)', () => {
+      const graph = createKnowledgeGraph();
+      addClass(graph, 'I', 'java', 'Interface');
+      addClass(graph, 'C', 'java', 'Class');
+      addImplements(graph, 'C', 'I');
+      addMethod(graph, 'I', 'foo', 'Interface');
+      const cFoo = addMethod(graph, 'C', 'foo');
+
+      computeMRO(graph);
+
+      const mi = graph.relationships.filter((r) => r.type === 'METHOD_IMPLEMENTS');
+      expect(mi).toHaveLength(1);
+      expect(mi[0].sourceId).toBe(cFoo);
+    });
   });
 });
