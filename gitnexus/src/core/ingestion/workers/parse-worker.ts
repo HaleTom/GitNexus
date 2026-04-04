@@ -538,7 +538,11 @@ const findEnclosingFunctionId = (
         // Qualify with enclosing class to match definition-phase node IDs
         const classInfo = cachedFindEnclosingClassInfo(current, filePath);
         const qualifiedName = classInfo ? `${classInfo.className}.${funcName}` : funcName;
-        const result = generateId(finalLabel, `${filePath}:${qualifiedName}`);
+        // Include #<arity> suffix to match definition-phase Method/Constructor IDs
+        const needsArity = finalLabel === 'Method' || finalLabel === 'Constructor';
+        const arity = needsArity ? extractMethodSignature(current).parameterCount : undefined;
+        const arityTag = arity !== undefined ? `#${arity}` : '';
+        const result = generateId(finalLabel, `${filePath}:${qualifiedName}${arityTag}`);
         functionIdCache.set(node, result);
         return result;
       }
@@ -562,7 +566,12 @@ const findEnclosingFunctionId = (
         const qualifiedName = classInfo
           ? `${classInfo.className}.${customResult.funcName}`
           : customResult.funcName;
-        const result = generateId(finalLabel, `${filePath}:${qualifiedName}`);
+        // Include #<arity> suffix to match definition-phase Method/Constructor IDs
+        const sigNode = current.previousSibling ?? current;
+        const needsArity2 = finalLabel === 'Method' || finalLabel === 'Constructor';
+        const arity2 = needsArity2 ? extractMethodSignature(sigNode).parameterCount : undefined;
+        const arityTag2 = arity2 !== undefined ? `#${arity2}` : '';
+        const result = generateId(finalLabel, `${filePath}:${qualifiedName}${arityTag2}`);
         functionIdCache.set(node, result);
         return result;
       }
@@ -1775,7 +1784,137 @@ const processFileGroup = (
       const qualifiedName = enclosingClassInfo
         ? `${enclosingClassInfo.className}.${nodeName}`
         : nodeName;
-      const nodeId = generateId(nodeLabel, `${file.path}:${qualifiedName}`);
+
+      // Extract method metadata BEFORE generating node ID — parameterCount is needed
+      // to disambiguate overloaded methods via #<arity> suffix in the ID.
+      let parameterCount: number | undefined;
+      let requiredParameterCount: number | undefined;
+      let parameterTypes: string[] | undefined;
+      let returnType: string | undefined;
+      let declaredType: string | undefined;
+      let visibility: string | undefined;
+      let isStatic: boolean | undefined;
+      let isReadonly: boolean | undefined;
+      let isAbstract: boolean | undefined;
+      let isFinal: boolean | undefined;
+      let isVirtual: boolean | undefined;
+      let isOverride: boolean | undefined;
+      let isAsync: boolean | undefined;
+      let isPartial: boolean | undefined;
+      let annotations: string[] | undefined;
+      let arityForId: number | undefined; // raw param count for ID, even for variadic
+      if (nodeLabel === 'Function' || nodeLabel === 'Method' || nodeLabel === 'Constructor') {
+        // Try MethodExtractor first — it provides everything extractMethodSignature does, plus
+        // isAbstract/isFinal/annotations. Only fall back to extractMethodSignature when no
+        // MethodExtractor is available or the method isn't inside a class body.
+        let enrichedByMethodExtractor = false;
+        if (provider.methodExtractor && definitionNode) {
+          const classNode =
+            findEnclosingClassNode(definitionNode) ?? findClassNodeByQualifiedName(definitionNode);
+          if (classNode) {
+            const methodMap = getMethodInfo(classNode, provider, {
+              filePath: file.path,
+              language,
+            });
+            const defLine = definitionNode.startPosition.row + 1;
+            const info = methodMap?.get(`${nodeName}:${defLine}`);
+            if (info) {
+              enrichedByMethodExtractor = true;
+              const hasVariadic = info.parameters.some((p) => p.isVariadic);
+              arityForId = info.parameters.length;
+              parameterCount = hasVariadic ? undefined : info.parameters.length;
+              const types: string[] = [];
+              let optionalCount = 0;
+              for (const p of info.parameters) {
+                if (p.type !== null) types.push(p.type);
+                if (p.isOptional) optionalCount++;
+              }
+              parameterTypes = types.length > 0 ? types : undefined;
+              requiredParameterCount =
+                !hasVariadic && optionalCount > 0
+                  ? info.parameters.length - optionalCount
+                  : undefined;
+              returnType = info.returnType ?? undefined;
+              visibility = info.visibility;
+              isStatic = info.isStatic;
+              isAbstract = info.isAbstract;
+              isFinal = info.isFinal;
+              if (info.isVirtual) isVirtual = info.isVirtual;
+              if (info.isOverride) isOverride = info.isOverride;
+              if (info.isAsync) isAsync = info.isAsync;
+              if (info.isPartial) isPartial = info.isPartial;
+              if (info.annotations.length > 0) annotations = info.annotations;
+            }
+          }
+        }
+
+        // For top-level methods (e.g. Go method_declaration), try extractFromNode
+        if (
+          !enrichedByMethodExtractor &&
+          provider.methodExtractor?.extractFromNode &&
+          definitionNode
+        ) {
+          const info = provider.methodExtractor.extractFromNode(definitionNode, {
+            filePath: file.path,
+            language,
+          });
+          if (info) {
+            enrichedByMethodExtractor = true;
+            const hasVariadic = info.parameters.some((p) => p.isVariadic);
+            arityForId = info.parameters.length;
+            parameterCount = hasVariadic ? undefined : info.parameters.length;
+            const types: string[] = [];
+            let optionalCount = 0;
+            for (const p of info.parameters) {
+              if (p.type !== null) types.push(p.type);
+              if (p.isOptional) optionalCount++;
+            }
+            parameterTypes = types.length > 0 ? types : undefined;
+            requiredParameterCount =
+              !hasVariadic && optionalCount > 0
+                ? info.parameters.length - optionalCount
+                : undefined;
+            returnType = info.returnType ?? undefined;
+            visibility = info.visibility;
+            isStatic = info.isStatic;
+            isAbstract = info.isAbstract;
+            isFinal = info.isFinal;
+            if (info.isVirtual) isVirtual = info.isVirtual;
+            if (info.isOverride) isOverride = info.isOverride;
+            if (info.isAsync) isAsync = info.isAsync;
+            if (info.isPartial) isPartial = info.isPartial;
+            if (info.annotations.length > 0) annotations = info.annotations;
+          }
+        }
+
+        if (!enrichedByMethodExtractor) {
+          const sig = extractMethodSignature(definitionNode);
+          arityForId = sig.parameterCount;
+          parameterCount = sig.parameterCount;
+          requiredParameterCount = sig.requiredParameterCount;
+          parameterTypes = sig.parameterTypes;
+          returnType = sig.returnType;
+        }
+
+        // Language-specific return type fallback (e.g. Ruby YARD @return [Type])
+        // Also upgrades uninformative AST types like PHP `array` with PHPDoc `@return User[]`
+        if (
+          (!returnType || returnType === 'array' || returnType === 'iterable') &&
+          definitionNode
+        ) {
+          const tc = provider.typeConfig;
+          if (tc?.extractReturnType) {
+            const docReturn = tc.extractReturnType(definitionNode);
+            if (docReturn) returnType = docReturn;
+          }
+        }
+      }
+
+      // Append #<paramCount> to Method/Constructor IDs to disambiguate overloads.
+      // Functions are not suffixed — they don't overload by name in the same scope.
+      const needsAritySuffix = nodeLabel === 'Method' || nodeLabel === 'Constructor';
+      const arityTag = needsAritySuffix && arityForId !== undefined ? `#${arityForId}` : '';
+      const nodeId = generateId(nodeLabel, `${file.path}:${qualifiedName}${arityTag}`);
 
       const description = provider.descriptionExtractor?.(nodeLabel, nodeName, captureMap);
 
@@ -1817,124 +1956,8 @@ const processFileGroup = (
         }
       }
 
-      let parameterCount: number | undefined;
-      let requiredParameterCount: number | undefined;
-      let parameterTypes: string[] | undefined;
-      let returnType: string | undefined;
-      let declaredType: string | undefined;
-      let visibility: string | undefined;
-      let isStatic: boolean | undefined;
-      let isReadonly: boolean | undefined;
-      let isAbstract: boolean | undefined;
-      let isFinal: boolean | undefined;
-      let isVirtual: boolean | undefined;
-      let isOverride: boolean | undefined;
-      let isAsync: boolean | undefined;
-      let isPartial: boolean | undefined;
-      let annotations: string[] | undefined;
-      if (nodeLabel === 'Function' || nodeLabel === 'Method' || nodeLabel === 'Constructor') {
-        // Try MethodExtractor first — it provides everything extractMethodSignature does, plus
-        // isAbstract/isFinal/annotations. Only fall back to extractMethodSignature when no
-        // MethodExtractor is available or the method isn't inside a class body.
-        let enrichedByMethodExtractor = false;
-        if (provider.methodExtractor && definitionNode) {
-          const classNode =
-            findEnclosingClassNode(definitionNode) ?? findClassNodeByQualifiedName(definitionNode);
-          if (classNode) {
-            const methodMap = getMethodInfo(classNode, provider, {
-              filePath: file.path,
-              language,
-            });
-            const defLine = definitionNode.startPosition.row + 1;
-            const info = methodMap?.get(`${nodeName}:${defLine}`);
-            if (info) {
-              enrichedByMethodExtractor = true;
-              const hasVariadic = info.parameters.some((p) => p.isVariadic);
-              parameterCount = hasVariadic ? undefined : info.parameters.length;
-              const types: string[] = [];
-              let optionalCount = 0;
-              for (const p of info.parameters) {
-                if (p.type !== null) types.push(p.type);
-                if (p.isOptional) optionalCount++;
-              }
-              parameterTypes = types.length > 0 ? types : undefined;
-              requiredParameterCount =
-                !hasVariadic && optionalCount > 0
-                  ? info.parameters.length - optionalCount
-                  : undefined;
-              returnType = info.returnType ?? undefined;
-              visibility = info.visibility;
-              isStatic = info.isStatic;
-              isAbstract = info.isAbstract;
-              isFinal = info.isFinal;
-              if (info.isVirtual) isVirtual = info.isVirtual;
-              if (info.isOverride) isOverride = info.isOverride;
-              if (info.isAsync) isAsync = info.isAsync;
-              if (info.isPartial) isPartial = info.isPartial;
-              if (info.annotations.length > 0) annotations = info.annotations;
-            }
-          }
-        }
-
-        // For top-level methods (e.g. Go method_declaration), try extractFromNode
-        if (
-          !enrichedByMethodExtractor &&
-          provider.methodExtractor?.extractFromNode &&
-          definitionNode
-        ) {
-          const info = provider.methodExtractor.extractFromNode(definitionNode, {
-            filePath: file.path,
-            language,
-          });
-          if (info) {
-            enrichedByMethodExtractor = true;
-            const hasVariadic = info.parameters.some((p) => p.isVariadic);
-            parameterCount = hasVariadic ? undefined : info.parameters.length;
-            const types: string[] = [];
-            let optionalCount = 0;
-            for (const p of info.parameters) {
-              if (p.type !== null) types.push(p.type);
-              if (p.isOptional) optionalCount++;
-            }
-            parameterTypes = types.length > 0 ? types : undefined;
-            requiredParameterCount =
-              !hasVariadic && optionalCount > 0
-                ? info.parameters.length - optionalCount
-                : undefined;
-            returnType = info.returnType ?? undefined;
-            visibility = info.visibility;
-            isStatic = info.isStatic;
-            isAbstract = info.isAbstract;
-            isFinal = info.isFinal;
-            if (info.isVirtual) isVirtual = info.isVirtual;
-            if (info.isOverride) isOverride = info.isOverride;
-            if (info.isAsync) isAsync = info.isAsync;
-            if (info.isPartial) isPartial = info.isPartial;
-            if (info.annotations.length > 0) annotations = info.annotations;
-          }
-        }
-
-        if (!enrichedByMethodExtractor) {
-          const sig = extractMethodSignature(definitionNode);
-          parameterCount = sig.parameterCount;
-          requiredParameterCount = sig.requiredParameterCount;
-          parameterTypes = sig.parameterTypes;
-          returnType = sig.returnType;
-        }
-
-        // Language-specific return type fallback (e.g. Ruby YARD @return [Type])
-        // Also upgrades uninformative AST types like PHP `array` with PHPDoc `@return User[]`
-        if (
-          (!returnType || returnType === 'array' || returnType === 'iterable') &&
-          definitionNode
-        ) {
-          const tc = provider.typeConfig;
-          if (tc?.extractReturnType) {
-            const docReturn = tc.extractReturnType(definitionNode);
-            if (docReturn) returnType = docReturn;
-          }
-        }
-      } else if (nodeLabel === 'Property' && definitionNode) {
+      // Property metadata extraction (not needed before nodeId — Properties don't overload)
+      if (nodeLabel === 'Property' && definitionNode) {
         // FieldExtractor is the single source of truth when available
         if (provider.fieldExtractor && typeEnv) {
           const classNode = findEnclosingClassNode(definitionNode);

@@ -414,18 +414,16 @@ const processParsingSequential = async (
       const qualifiedName = enclosingClassInfo
         ? `${enclosingClassInfo.className}.${nodeName}`
         : nodeName;
-      const nodeId = generateId(nodeLabel, `${file.path}:${qualifiedName}`);
-      const frameworkHint = definitionNode
-        ? detectFrameworkFromAST(language, (definitionNode.text || '').slice(0, 300))
-        : null;
 
-      // Extract method metadata for Function/Method/Constructor nodes.
+      // Extract method metadata for Function/Method/Constructor nodes BEFORE generating
+      // the node ID — parameterCount is needed to disambiguate overloaded methods.
       // Try the per-language methodExtractor first (provides isAbstract, isStatic,
       // visibility, annotations, etc.). Fall back to extractMethodSignature for
       // basic parameterCount/parameterTypes/returnType when no methodExtractor exists.
       const isMethodLike =
         nodeLabel === 'Function' || nodeLabel === 'Method' || nodeLabel === 'Constructor';
       let methodProps: Record<string, unknown> = {};
+      let arityForId: number | undefined; // raw param count for ID, even for variadic
       if (isMethodLike && definitionNode) {
         let enriched = false;
 
@@ -452,6 +450,7 @@ const processParsingSequential = async (
               const info = result.methods.find((m) => m.name === nodeName && m.line === defLine);
               if (info) {
                 enriched = true;
+                arityForId = info.parameters.length;
                 methodProps = buildMethodProps(info);
               }
             }
@@ -465,6 +464,7 @@ const processParsingSequential = async (
             });
             if (info) {
               enriched = true;
+              arityForId = info.parameters.length;
               methodProps = buildMethodProps(info);
             }
           }
@@ -473,6 +473,7 @@ const processParsingSequential = async (
         // Fallback to generic extractMethodSignature
         if (!enriched) {
           const sig = extractMethodSignature(definitionNode);
+          arityForId = sig.parameterCount;
           methodProps = {
             parameterCount: sig.parameterCount,
             ...(sig.requiredParameterCount !== undefined
@@ -494,6 +495,15 @@ const processParsingSequential = async (
           }
         }
       }
+
+      // Append #<paramCount> to Method/Constructor IDs to disambiguate overloads.
+      // Functions are not suffixed — they don't overload by name in the same scope.
+      const needsAritySuffix = nodeLabel === 'Method' || nodeLabel === 'Constructor';
+      const arityTag = needsAritySuffix && arityForId !== undefined ? `#${arityForId}` : '';
+      const nodeId = generateId(nodeLabel, `${file.path}:${qualifiedName}${arityTag}`);
+      const frameworkHint = definitionNode
+        ? detectFrameworkFromAST(language, (definitionNode.text || '').slice(0, 300))
+        : null;
 
       const node: GraphNode = {
         id: nodeId,

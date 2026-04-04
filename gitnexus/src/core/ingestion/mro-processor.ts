@@ -472,17 +472,17 @@ function parameterTypesMatch(
 
 /**
  * For each concrete class that implements/extends an interface or trait,
- *
- * **Known limitation — overloaded methods:** The parameterTypes/arity matching
- * logic is correct for the data it receives, but the graph model collapses
- * overloaded methods (same name in same class) into a single node keyed by
- * `filePath:ClassName.methodName`. Until overloads get distinct node IDs
- * (separate RFC, see issue #574 Known Limitations), METHOD_IMPLEMENTS edges
- * for overloaded interfaces may attach to whichever overload was parsed first.
- * The arity-compatible matching and confidence tiering mitigate but do not
- * eliminate this — real disambiguation requires first-class overload nodes.
  * find methods in the class that implement methods defined in the interface
  * and emit METHOD_IMPLEMENTS edges: ConcreteMethod → InterfaceMethod.
+ *
+ * Method node IDs include a `#<paramCount>` arity suffix, so overloaded
+ * methods with different parameter counts are distinct nodes in the graph.
+ *
+ * **Remaining limitation — same-arity overloads:** When two overloads share
+ * the same parameter count but differ only in types (e.g. `save(int)` vs
+ * `save(String)`), they still collapse to one node ID. This is rare in
+ * practice; a future enhancement may add type-hash disambiguation for
+ * languages with reliable type extraction (see issue #574).
  */
 function emitMethodImplementsEdges(
   graph: KnowledgeGraph,

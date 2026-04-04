@@ -621,7 +621,15 @@ const resolveMethodReturnType = (
   parentMap?: ReadonlyMap<string, readonly string[]>,
 ): string | undefined => {
   if (!symbolTable) return undefined;
-  const receiverType = scopeEnv.get(receiver);
+  let receiverType = scopeEnv.get(receiver);
+  // When substituteThisReceiver replaced $this/self with the enclosing class name,
+  // the receiver IS the type — look it up directly as a class name.
+  if (!receiverType) {
+    const lookup =
+      getClassDefs ??
+      ((name: string) => symbolTable.lookupFuzzy(name).filter((d) => CLASS_LIKE_TYPES.has(d.type)));
+    if (lookup(receiver).length > 0) receiverType = receiver;
+  }
   if (!receiverType) return undefined;
   const lookup =
     getClassDefs ??

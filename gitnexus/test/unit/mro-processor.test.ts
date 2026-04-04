@@ -29,16 +29,19 @@ function addMethod(
   methodName: string,
   classLabel: 'Class' | 'Interface' | 'Struct' | 'Trait' = 'Class',
   parameterTypes?: string[],
-  opts?: { isAbstract?: boolean },
+  opts?: { isAbstract?: boolean; parameterCount?: number },
 ) {
+  // Derive arity for the ID suffix: explicit parameterCount > parameterTypes.length > 0
+  const arity = opts?.parameterCount ?? parameterTypes?.length ?? 0;
   const classId = generateId(classLabel, className);
-  const methodId = generateId('Method', `${className}.${methodName}`);
+  const methodId = generateId('Method', `${className}.${methodName}#${arity}`);
   graph.addNode({
     id: methodId,
     label: 'Method',
     properties: {
       name: methodName,
       filePath: `src/${className}.ts`,
+      parameterCount: arity,
       ...(parameterTypes ? { parameterTypes } : {}),
       ...(opts?.isAbstract !== undefined ? { isAbstract: opts.isAbstract } : {}),
     },
@@ -560,8 +563,8 @@ describe('computeMRO', () => {
       expect(edges).toHaveLength(1);
       expect(edges[0].sourceId).toBe(classMethod);
       expect(edges[0].targetId).toBe(ifaceMethod);
-      // No parameterTypes or parameterCount on either side → lenient match → 0.7
-      expect(edges[0].confidence).toBe(0.7);
+      // Both sides have parameterCount=0 (arity match) → confidence 1.0
+      expect(edges[0].confidence).toBe(1.0);
     });
 
     it('emits METHOD_IMPLEMENTS for Rust struct implementing trait', () => {
@@ -592,11 +595,16 @@ describe('computeMRO', () => {
       addImplements(graph, 'SqlRepo', 'IRepo');
 
       // Use manual IDs to avoid overloaded-name collision (same name, different types)
-      const ifaceFind1 = generateId('Method', 'IRepo.find.1');
+      const ifaceFind1 = generateId('Method', 'IRepo.find#1');
       graph.addNode({
         id: ifaceFind1,
         label: 'Method',
-        properties: { name: 'find', filePath: 'src/IRepo.ts', parameterTypes: ['String'] },
+        properties: {
+          name: 'find',
+          filePath: 'src/IRepo.ts',
+          parameterTypes: ['String'],
+          parameterCount: 1,
+        },
       });
       graph.addRelationship({
         id: generateId('HAS_METHOD', `${generateId('Interface', 'IRepo')}->${ifaceFind1}`),
@@ -607,11 +615,16 @@ describe('computeMRO', () => {
         reason: '',
       });
 
-      const ifaceFind2 = generateId('Method', 'IRepo.find.2');
+      const ifaceFind2 = generateId('Method', 'IRepo.find#2');
       graph.addNode({
         id: ifaceFind2,
         label: 'Method',
-        properties: { name: 'find', filePath: 'src/IRepo.ts', parameterTypes: ['String', 'int'] },
+        properties: {
+          name: 'find',
+          filePath: 'src/IRepo.ts',
+          parameterTypes: ['String', 'int'],
+          parameterCount: 2,
+        },
       });
       graph.addRelationship({
         id: generateId('HAS_METHOD', `${generateId('Interface', 'IRepo')}->${ifaceFind2}`),
@@ -622,11 +635,16 @@ describe('computeMRO', () => {
         reason: '',
       });
 
-      const sqlFind1Id = generateId('Method', 'SqlRepo.find.1');
+      const sqlFind1Id = generateId('Method', 'SqlRepo.find#1');
       graph.addNode({
         id: sqlFind1Id,
         label: 'Method',
-        properties: { name: 'find', filePath: 'src/SqlRepo.ts', parameterTypes: ['String'] },
+        properties: {
+          name: 'find',
+          filePath: 'src/SqlRepo.ts',
+          parameterTypes: ['String'],
+          parameterCount: 1,
+        },
       });
       graph.addRelationship({
         id: generateId('HAS_METHOD', `${generateId('Class', 'SqlRepo')}->${sqlFind1Id}`),
@@ -637,11 +655,16 @@ describe('computeMRO', () => {
         reason: '',
       });
 
-      const sqlFind2Id = generateId('Method', 'SqlRepo.find.2');
+      const sqlFind2Id = generateId('Method', 'SqlRepo.find#2');
       graph.addNode({
         id: sqlFind2Id,
         label: 'Method',
-        properties: { name: 'find', filePath: 'src/SqlRepo.ts', parameterTypes: ['String', 'int'] },
+        properties: {
+          name: 'find',
+          filePath: 'src/SqlRepo.ts',
+          parameterTypes: ['String', 'int'],
+          parameterCount: 2,
+        },
       });
       graph.addRelationship({
         id: generateId('HAS_METHOD', `${generateId('Class', 'SqlRepo')}->${sqlFind2Id}`),
@@ -813,7 +836,7 @@ describe('computeMRO', () => {
 
         const result = computeMRO(graph);
 
-        const eFoo = generateId('Method', 'E.foo');
+        const eFoo = generateId('Method', 'E.foo#0');
         const edges: any[] = [];
         graph.forEachRelationship((rel) => {
           if (rel.type === 'METHOD_IMPLEMENTS') edges.push(rel);
@@ -958,7 +981,7 @@ describe('computeMRO', () => {
         addImplements(graph, 'CArity', 'IArity');
 
         // Interface method: parameterCount=2, no parameterTypes
-        const iMethodId = generateId('Method', 'IArity.process');
+        const iMethodId = generateId('Method', 'IArity.process#2');
         graph.addNode({
           id: iMethodId,
           label: 'Method',
@@ -974,7 +997,7 @@ describe('computeMRO', () => {
         });
 
         // Class method: parameterCount=3, no parameterTypes
-        const cMethodId = generateId('Method', 'CArity.process');
+        const cMethodId = generateId('Method', 'CArity.process#3');
         graph.addNode({
           id: cMethodId,
           label: 'Method',
@@ -1000,7 +1023,7 @@ describe('computeMRO', () => {
         addImplements(graph, 'CArityOk', 'IArityOk');
 
         // Interface method: parameterCount=2, no parameterTypes
-        const iMethodId = generateId('Method', 'IArityOk.process');
+        const iMethodId = generateId('Method', 'IArityOk.process#2');
         graph.addNode({
           id: iMethodId,
           label: 'Method',
@@ -1016,7 +1039,7 @@ describe('computeMRO', () => {
         });
 
         // Class method: parameterCount=2, no parameterTypes
-        const cMethodId = generateId('Method', 'CArityOk.process');
+        const cMethodId = generateId('Method', 'CArityOk.process#2');
         graph.addNode({
           id: cMethodId,
           label: 'Method',
@@ -1042,7 +1065,7 @@ describe('computeMRO', () => {
         addImplements(graph, 'CAmbig', 'IAmbig');
 
         // Interface method: parameterCount=1, no parameterTypes
-        const iMethodId = generateId('Method', 'IAmbig.handle');
+        const iMethodId = generateId('Method', 'IAmbig.handle#1');
         graph.addNode({
           id: iMethodId,
           label: 'Method',
@@ -1058,7 +1081,7 @@ describe('computeMRO', () => {
         });
 
         // Two class methods named handle, both with parameterCount=1
-        const cMethod1 = generateId('Method', 'CAmbig.handle.1');
+        const cMethod1 = generateId('Method', 'CAmbig.handle.1#1');
         graph.addNode({
           id: cMethod1,
           label: 'Method',
@@ -1073,7 +1096,7 @@ describe('computeMRO', () => {
           reason: '',
         });
 
-        const cMethod2 = generateId('Method', 'CAmbig.handle.2');
+        const cMethod2 = generateId('Method', 'CAmbig.handle.2#1');
         graph.addNode({
           id: cMethod2,
           label: 'Method',
@@ -1163,7 +1186,7 @@ describe('computeMRO', () => {
       const fooEdge = mi.find((e) => e.sourceId === bFoo);
       expect(fooEdge).toBeDefined();
       // A.foo should NOT be reached
-      const aFooId = generateId('Method', 'A.foo');
+      const aFooId = generateId('Method', 'A.foo#0');
       const aFooEdge = mi.find((e) => e.sourceId === aFooId);
       expect(aFooEdge).toBeUndefined();
     });
@@ -1214,11 +1237,11 @@ describe('computeMRO', () => {
 
       // Add abstract method manually with isAbstract flag
       const classId = generateId('Class', 'C');
-      const methodId = generateId('Method', 'C.foo');
+      const methodId = generateId('Method', 'C.foo#0');
       graph.addNode({
         id: methodId,
         label: 'Method',
-        properties: { name: 'foo', filePath: 'src/C.ts', isAbstract: true },
+        properties: { name: 'foo', filePath: 'src/C.ts', isAbstract: true, parameterCount: 0 },
       });
       graph.addRelationship({
         id: generateId('HAS_METHOD', `${classId}->${methodId}`),
@@ -1465,7 +1488,7 @@ describe('computeMRO', () => {
       addImplements(graph, 'CArity', 'IArity');
 
       // Manually add methods with parameterCount but no parameterTypes
-      const iBarId = generateId('Method', 'IArity.bar');
+      const iBarId = generateId('Method', 'IArity.bar#2');
       graph.addNode({
         id: iBarId,
         label: 'Method',
@@ -1480,7 +1503,7 @@ describe('computeMRO', () => {
         reason: '',
       });
 
-      const cBarId = generateId('Method', 'CArity.bar');
+      const cBarId = generateId('Method', 'CArity.bar#2');
       graph.addNode({
         id: cBarId,
         label: 'Method',
@@ -1510,16 +1533,43 @@ describe('computeMRO', () => {
       addClass(graph, 'CLenient', 'java');
       addImplements(graph, 'CLenient', 'ILenient');
 
-      // addMethod without parameterTypes → no types, no parameterCount
-      const iBaz = addMethod(graph, 'ILenient', 'baz', 'Interface');
-      const cBaz = addMethod(graph, 'CLenient', 'baz');
+      // Manually create methods WITHOUT parameterCount to simulate legacy/missing arity
+      const iBazId = generateId('Method', 'ILenient.baz');
+      graph.addNode({
+        id: iBazId,
+        label: 'Method',
+        properties: { name: 'baz', filePath: 'src/ILenient.ts' },
+      });
+      graph.addRelationship({
+        id: generateId('HAS_METHOD', `${generateId('Interface', 'ILenient')}->${iBazId}`),
+        sourceId: generateId('Interface', 'ILenient'),
+        targetId: iBazId,
+        type: 'HAS_METHOD',
+        confidence: 1.0,
+        reason: '',
+      });
+
+      const cBazId = generateId('Method', 'CLenient.baz');
+      graph.addNode({
+        id: cBazId,
+        label: 'Method',
+        properties: { name: 'baz', filePath: 'src/CLenient.ts' },
+      });
+      graph.addRelationship({
+        id: generateId('HAS_METHOD', `${generateId('Class', 'CLenient')}->${cBazId}`),
+        sourceId: generateId('Class', 'CLenient'),
+        targetId: cBazId,
+        type: 'HAS_METHOD',
+        confidence: 1.0,
+        reason: '',
+      });
 
       computeMRO(graph);
 
       const edges = graph.relationships.filter((r) => r.type === 'METHOD_IMPLEMENTS');
       expect(edges).toHaveLength(1);
-      expect(edges[0].sourceId).toBe(cBaz);
-      expect(edges[0].targetId).toBe(iBaz);
+      expect(edges[0].sourceId).toBe(cBazId);
+      expect(edges[0].targetId).toBe(iBazId);
       expect(edges[0].confidence).toBe(0.7);
     });
 
@@ -1530,7 +1580,7 @@ describe('computeMRO', () => {
       addImplements(graph, 'CHalf', 'IHalf');
 
       // Interface method has parameterCount but no parameterTypes
-      const iQuxId = generateId('Method', 'IHalf.qux');
+      const iQuxId = generateId('Method', 'IHalf.qux#2');
       graph.addNode({
         id: iQuxId,
         label: 'Method',
@@ -1545,14 +1595,27 @@ describe('computeMRO', () => {
         reason: '',
       });
 
-      // Class method has neither parameterTypes nor parameterCount
-      const cQux = addMethod(graph, 'CHalf', 'qux');
+      // Class method has neither parameterTypes nor parameterCount (manually constructed)
+      const cQuxId = generateId('Method', 'CHalf.qux');
+      graph.addNode({
+        id: cQuxId,
+        label: 'Method',
+        properties: { name: 'qux', filePath: 'src/CHalf.ts' },
+      });
+      graph.addRelationship({
+        id: generateId('HAS_METHOD', `${generateId('Class', 'CHalf')}->${cQuxId}`),
+        sourceId: generateId('Class', 'CHalf'),
+        targetId: cQuxId,
+        type: 'HAS_METHOD',
+        confidence: 1.0,
+        reason: '',
+      });
 
       computeMRO(graph);
 
       const edges = graph.relationships.filter((r) => r.type === 'METHOD_IMPLEMENTS');
       expect(edges).toHaveLength(1);
-      expect(edges[0].sourceId).toBe(cQux);
+      expect(edges[0].sourceId).toBe(cQuxId);
       expect(edges[0].targetId).toBe(iQuxId);
       expect(edges[0].confidence).toBe(0.7);
     });

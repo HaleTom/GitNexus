@@ -13,6 +13,7 @@ import { yieldToEventLoop } from './utils/event-loop.js';
 import {
   FUNCTION_NODE_TYPES,
   extractFunctionName,
+  extractMethodSignature,
   findEnclosingClassId,
   findEnclosingClassInfo,
 } from './utils/ast-helpers.js';
@@ -264,7 +265,11 @@ const findEnclosingFunction = (
         }
         const classInfo = findEnclosingClassInfo(current, filePath);
         const qualifiedName = classInfo ? `${classInfo.className}.${funcName}` : funcName;
-        return generateId(finalLabel, `${filePath}:${qualifiedName}`);
+        // Include #<arity> suffix to match definition-phase Method/Constructor IDs
+        const needsArity = finalLabel === 'Method' || finalLabel === 'Constructor';
+        const arity = needsArity ? extractMethodSignature(current).parameterCount : undefined;
+        const arityTag = arity !== undefined ? `#${arity}` : '';
+        return generateId(finalLabel, `${filePath}:${qualifiedName}${arityTag}`);
       }
     }
 
@@ -299,7 +304,12 @@ const findEnclosingFunction = (
         const qualifiedName = classInfo
           ? `${classInfo.className}.${customResult.funcName}`
           : customResult.funcName;
-        return generateId(finalLabel, `${filePath}:${qualifiedName}`);
+        // Include #<arity> suffix to match definition-phase Method/Constructor IDs
+        const sigNode = current.previousSibling ?? current;
+        const needsArity2 = finalLabel === 'Method' || finalLabel === 'Constructor';
+        const arity2 = needsArity2 ? extractMethodSignature(sigNode).parameterCount : undefined;
+        const arityTag2 = arity2 !== undefined ? `#${arity2}` : '';
+        return generateId(finalLabel, `${filePath}:${qualifiedName}${arityTag2}`);
       }
     }
 
@@ -1384,12 +1394,16 @@ const extractFuncNameFromScope = (scope: string): string => scope.slice(0, scope
 
 /** Extract the bare function name from a sourceId.
  *  Handles both unqualified ("Function:filepath:funcName" → "funcName")
- *  and qualified ("Function:filepath:ClassName.funcName" → "funcName"). */
+ *  and qualified ("Function:filepath:ClassName.funcName" → "funcName").
+ *  Strips any trailing #<arity> suffix from Method/Constructor IDs. */
 const extractFuncNameFromSourceId = (sourceId: string): string => {
   const lastColon = sourceId.lastIndexOf(':');
   const segment = lastColon >= 0 ? sourceId.slice(lastColon + 1) : '';
   const dotIdx = segment.lastIndexOf('.');
-  return dotIdx >= 0 ? segment.slice(dotIdx + 1) : segment;
+  const raw = dotIdx >= 0 ? segment.slice(dotIdx + 1) : segment;
+  // Strip #<arity> suffix (e.g. "save#2" → "save")
+  const hashIdx = raw.indexOf('#');
+  return hashIdx >= 0 ? raw.slice(0, hashIdx) : raw;
 };
 
 /**
