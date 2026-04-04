@@ -15,7 +15,9 @@ import { cCppExportChecker } from '../export-detection.js';
 import { resolveCImport, resolveCppImport } from '../import-resolvers/standard.js';
 import { C_QUERIES, CPP_QUERIES } from '../tree-sitter-queries.js';
 
-import { isCppInsideClassOrStruct } from '../utils/ast-helpers.js';
+import { isCppInsideClassOrStruct, FUNCTION_DECLARATION_TYPES } from '../utils/ast-helpers.js';
+import type { SyntaxNode } from '../utils/ast-helpers.js';
+import type { NodeLabel } from 'gitnexus-shared';
 import type { LanguageProvider } from '../language-provider.js';
 import { createFieldExtractor } from '../field-extractors/generic.js';
 import {
@@ -132,6 +134,142 @@ const C_BUILT_INS: ReadonlySet<string> = new Set([
   'put',
 ]);
 
+/**
+ * C/C++ function name extraction — unwraps pointer_declarator / reference_declarator /
+ * function_declarator / qualified_identifier chains to find the actual function name.
+ * Handles field_identifier (method inside class body) and parenthesized_declarator.
+ */
+const cCppExtractFunctionName = (
+  node: SyntaxNode,
+): { funcName: string | null; label: NodeLabel } | null => {
+  if (!FUNCTION_DECLARATION_TYPES.has(node.type)) return null;
+
+  let funcName: string | null = null;
+  let label: NodeLabel = 'Function';
+
+  // C/C++: function_definition -> [pointer_declarator ->] function_declarator -> qualified_identifier/identifier
+  // Unwrap pointer_declarator / reference_declarator wrappers to reach function_declarator
+  let declarator = node.childForFieldName?.('declarator');
+  if (!declarator) {
+    for (let i = 0; i < node.childCount; i++) {
+      const c = node.child(i);
+      if (c?.type === 'function_declarator') {
+        declarator = c;
+        break;
+      }
+    }
+  }
+  while (
+    declarator &&
+    (declarator.type === 'pointer_declarator' || declarator.type === 'reference_declarator')
+  ) {
+    let nextDeclarator = declarator.childForFieldName?.('declarator');
+    if (!nextDeclarator) {
+      for (let i = 0; i < declarator.childCount; i++) {
+        const c = declarator.child(i);
+        if (
+          c?.type === 'function_declarator' ||
+          c?.type === 'pointer_declarator' ||
+          c?.type === 'reference_declarator'
+        ) {
+          nextDeclarator = c;
+          break;
+        }
+      }
+    }
+    declarator = nextDeclarator;
+  }
+  if (declarator) {
+    let innerDeclarator = declarator.childForFieldName?.('declarator');
+    if (!innerDeclarator) {
+      for (let i = 0; i < declarator.childCount; i++) {
+        const c = declarator.child(i);
+        if (
+          c?.type === 'qualified_identifier' ||
+          c?.type === 'identifier' ||
+          c?.type === 'field_identifier' ||
+          c?.type === 'parenthesized_declarator'
+        ) {
+          innerDeclarator = c;
+          break;
+        }
+      }
+    }
+
+    if (innerDeclarator?.type === 'qualified_identifier') {
+      let nameNode = innerDeclarator.childForFieldName?.('name');
+      if (!nameNode) {
+        for (let i = 0; i < innerDeclarator.childCount; i++) {
+          const c = innerDeclarator.child(i);
+          if (c?.type === 'identifier') {
+            nameNode = c;
+            break;
+          }
+        }
+      }
+      if (nameNode?.text) {
+        funcName = nameNode.text;
+        label = 'Method';
+      }
+    } else if (
+      innerDeclarator?.type === 'identifier' ||
+      innerDeclarator?.type === 'field_identifier'
+    ) {
+      // field_identifier is used for method names inside C++ class bodies
+      funcName = innerDeclarator.text;
+      if (innerDeclarator.type === 'field_identifier') label = 'Method';
+    } else if (innerDeclarator?.type === 'parenthesized_declarator') {
+      let nestedId: SyntaxNode | null = null;
+      for (let i = 0; i < innerDeclarator.childCount; i++) {
+        const c = innerDeclarator.child(i);
+        if (c?.type === 'qualified_identifier' || c?.type === 'identifier') {
+          nestedId = c;
+          break;
+        }
+      }
+      if (nestedId?.type === 'qualified_identifier') {
+        let nameNode = nestedId.childForFieldName?.('name');
+        if (!nameNode) {
+          for (let i = 0; i < nestedId.childCount; i++) {
+            const c = nestedId.child(i);
+            if (c?.type === 'identifier') {
+              nameNode = c;
+              break;
+            }
+          }
+        }
+        if (nameNode?.text) {
+          funcName = nameNode.text;
+          label = 'Method';
+        }
+      } else if (nestedId?.type === 'identifier') {
+        funcName = nestedId.text;
+      }
+    }
+  }
+
+  // Fallback for other node types in FUNCTION_DECLARATION_TYPES (e.g. function_item for Rust in C++ tree)
+  if (!funcName) {
+    let nameNode = node.childForFieldName?.('name');
+    if (!nameNode) {
+      for (let i = 0; i < node.childCount; i++) {
+        const c = node.child(i);
+        if (
+          c?.type === 'identifier' ||
+          c?.type === 'property_identifier' ||
+          c?.type === 'simple_identifier'
+        ) {
+          nameNode = c;
+          break;
+        }
+      }
+    }
+    funcName = nameNode?.text ?? null;
+  }
+
+  return { funcName, label };
+};
+
 /** Label override shared by C and C++: skip function_definition captures inside class/struct
  *  bodies (they're duplicates of definition.method captures). */
 const cppLabelOverride: NonNullable<LanguageProvider['labelOverride']> = (
@@ -152,6 +290,7 @@ export const cProvider = defineLanguage({
   importSemantics: 'wildcard',
   fieldExtractor: createFieldExtractor(cFieldConfig),
   methodExtractor: createMethodExtractor(cMethodConfig),
+  extractFunctionName: cCppExtractFunctionName,
   labelOverride: cppLabelOverride,
   builtInNames: C_BUILT_INS,
 });
@@ -167,6 +306,7 @@ export const cppProvider = defineLanguage({
   mroStrategy: 'leftmost-base',
   fieldExtractor: createFieldExtractor(cppFieldConfig),
   methodExtractor: createMethodExtractor(cppMethodConfig),
+  extractFunctionName: cCppExtractFunctionName,
   labelOverride: cppLabelOverride,
   builtInNames: C_BUILT_INS,
 });

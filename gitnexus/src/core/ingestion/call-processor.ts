@@ -13,7 +13,6 @@ import { yieldToEventLoop } from './utils/event-loop.js';
 import {
   FUNCTION_NODE_TYPES,
   extractFunctionName,
-  countMethodParameters,
   findEnclosingClassId,
   findEnclosingClassInfo,
 } from './utils/ast-helpers.js';
@@ -235,7 +234,7 @@ const findEnclosingFunction = (
 
   while (current) {
     if (FUNCTION_NODE_TYPES.has(current.type)) {
-      const { funcName, label } = extractFunctionName(current);
+      const { funcName, label } = extractFunctionName(current, provider);
 
       if (funcName) {
         const resolved = ctx.resolve(funcName, filePath);
@@ -265,9 +264,18 @@ const findEnclosingFunction = (
         }
         const classInfo = findEnclosingClassInfo(current, filePath);
         const qualifiedName = classInfo ? `${classInfo.className}.${funcName}` : funcName;
-        // Include #<arity> suffix to match definition-phase Method/Constructor IDs
-        const needsArity = finalLabel === 'Method' || finalLabel === 'Constructor';
-        const arity = needsArity ? countMethodParameters(current) : undefined;
+        // Include #<arity> suffix to match definition-phase Method/Constructor IDs.
+        // Use provider.methodExtractor.extractFromNode — same extractor as definition phase.
+        let arity: number | undefined;
+        if (finalLabel === 'Method' || finalLabel === 'Constructor') {
+          const language = getLanguageFromFilename(filePath);
+          const info = language
+            ? provider.methodExtractor?.extractFromNode?.(current, { filePath, language })
+            : undefined;
+          if (info) {
+            arity = info.parameters.some((p) => p.isVariadic) ? undefined : info.parameters.length;
+          }
+        }
         const arityTag = arity !== undefined ? `#${arity}` : '';
         return generateId(finalLabel, `${filePath}:${qualifiedName}${arityTag}`);
       }
@@ -304,10 +312,18 @@ const findEnclosingFunction = (
         const qualifiedName = classInfo
           ? `${classInfo.className}.${customResult.funcName}`
           : customResult.funcName;
-        // Include #<arity> suffix to match definition-phase Method/Constructor IDs
+        // Include #<arity> suffix to match definition-phase Method/Constructor IDs.
         const sigNode = current.previousSibling ?? current;
-        const needsArity2 = finalLabel === 'Method' || finalLabel === 'Constructor';
-        const arity2 = needsArity2 ? countMethodParameters(sigNode) : undefined;
+        let arity2: number | undefined;
+        if (finalLabel === 'Method' || finalLabel === 'Constructor') {
+          const language = getLanguageFromFilename(filePath);
+          const info = language
+            ? provider.methodExtractor?.extractFromNode?.(sigNode, { filePath, language })
+            : undefined;
+          if (info) {
+            arity2 = info.parameters.some((p) => p.isVariadic) ? undefined : info.parameters.length;
+          }
+        }
         const arityTag2 = arity2 !== undefined ? `#${arity2}` : '';
         return generateId(finalLabel, `${filePath}:${qualifiedName}${arityTag2}`);
       }
@@ -850,7 +866,7 @@ export const processCalls = async (
         let p = callNode.parent;
         while (p) {
           if (FUNCTION_NODE_TYPES.has(p.type)) {
-            const { funcName } = extractFunctionName(p);
+            const { funcName } = extractFunctionName(p, provider);
             if (funcName) {
               scope = `${funcName}@${p.startIndex}`;
               break;

@@ -386,234 +386,45 @@ export const findSiblingChild = (
 
 /**
  * Extract function name and label from a function_definition or similar AST node.
- * Handles C/C++ qualified_identifier (ClassName::MethodName) and other language patterns.
+ *
+ * Thin dispatcher: delegates to provider.extractFunctionName when available,
+ * then falls back to generic name-field lookup for languages that don't need
+ * custom AST unwrapping.
  */
 export const extractFunctionName = (
   node: SyntaxNode,
+  provider?: {
+    extractFunctionName?: (
+      node: SyntaxNode,
+    ) => { funcName: string | null; label: NodeLabel } | null;
+  },
 ): { funcName: string | null; label: NodeLabel } => {
+  // Provider hook — language-specific extraction (C/C++ declarator unwrapping,
+  // Swift init/deinit, Rust impl_item, TS arrow functions, Ruby methods)
+  if (provider?.extractFunctionName) {
+    const result = provider.extractFunctionName(node);
+    if (result) return result;
+  }
+
+  // Generic fallback: determine label from node type, then try 'name' field
   let funcName: string | null = null;
   let label: NodeLabel = 'Function';
 
-  // Swift init/deinit
-  if (node.type === 'init_declaration' || node.type === 'deinit_declaration') {
-    return {
-      funcName: node.type === 'init_declaration' ? 'init' : 'deinit',
-      label: 'Constructor',
-    };
+  if (
+    node.type === 'method_definition' ||
+    node.type === 'method_declaration' ||
+    node.type === 'method' ||
+    node.type === 'singleton_method'
+  ) {
+    label = 'Method';
+  }
+  if (node.type === 'constructor_declaration' || node.type === 'compact_constructor_declaration') {
+    label = 'Constructor';
   }
 
-  if (FUNCTION_DECLARATION_TYPES.has(node.type)) {
-    // C/C++: function_definition -> [pointer_declarator ->] function_declarator -> qualified_identifier/identifier
-    // Unwrap pointer_declarator / reference_declarator wrappers to reach function_declarator
-    let declarator = node.childForFieldName?.('declarator');
-    if (!declarator) {
-      for (let i = 0; i < node.childCount; i++) {
-        const c = node.child(i);
-        if (c?.type === 'function_declarator') {
-          declarator = c;
-          break;
-        }
-      }
-    }
-    while (
-      declarator &&
-      (declarator.type === 'pointer_declarator' || declarator.type === 'reference_declarator')
-    ) {
-      let nextDeclarator = declarator.childForFieldName?.('declarator');
-      if (!nextDeclarator) {
-        for (let i = 0; i < declarator.childCount; i++) {
-          const c = declarator.child(i);
-          if (
-            c?.type === 'function_declarator' ||
-            c?.type === 'pointer_declarator' ||
-            c?.type === 'reference_declarator'
-          ) {
-            nextDeclarator = c;
-            break;
-          }
-        }
-      }
-      declarator = nextDeclarator;
-    }
-    if (declarator) {
-      let innerDeclarator = declarator.childForFieldName?.('declarator');
-      if (!innerDeclarator) {
-        for (let i = 0; i < declarator.childCount; i++) {
-          const c = declarator.child(i);
-          if (
-            c?.type === 'qualified_identifier' ||
-            c?.type === 'identifier' ||
-            c?.type === 'field_identifier' ||
-            c?.type === 'parenthesized_declarator'
-          ) {
-            innerDeclarator = c;
-            break;
-          }
-        }
-      }
-
-      if (innerDeclarator?.type === 'qualified_identifier') {
-        let nameNode = innerDeclarator.childForFieldName?.('name');
-        if (!nameNode) {
-          for (let i = 0; i < innerDeclarator.childCount; i++) {
-            const c = innerDeclarator.child(i);
-            if (c?.type === 'identifier') {
-              nameNode = c;
-              break;
-            }
-          }
-        }
-        if (nameNode?.text) {
-          funcName = nameNode.text;
-          label = 'Method';
-        }
-      } else if (
-        innerDeclarator?.type === 'identifier' ||
-        innerDeclarator?.type === 'field_identifier'
-      ) {
-        // field_identifier is used for method names inside C++ class bodies
-        funcName = innerDeclarator.text;
-        if (innerDeclarator.type === 'field_identifier') label = 'Method';
-      } else if (innerDeclarator?.type === 'parenthesized_declarator') {
-        let nestedId: SyntaxNode | null = null;
-        for (let i = 0; i < innerDeclarator.childCount; i++) {
-          const c = innerDeclarator.child(i);
-          if (c?.type === 'qualified_identifier' || c?.type === 'identifier') {
-            nestedId = c;
-            break;
-          }
-        }
-        if (nestedId?.type === 'qualified_identifier') {
-          let nameNode = nestedId.childForFieldName?.('name');
-          if (!nameNode) {
-            for (let i = 0; i < nestedId.childCount; i++) {
-              const c = nestedId.child(i);
-              if (c?.type === 'identifier') {
-                nameNode = c;
-                break;
-              }
-            }
-          }
-          if (nameNode?.text) {
-            funcName = nameNode.text;
-            label = 'Method';
-          }
-        } else if (nestedId?.type === 'identifier') {
-          funcName = nestedId.text;
-        }
-      }
-    }
-
-    // Fallback for other languages (Kotlin uses simple_identifier, Swift uses simple_identifier)
-    if (!funcName) {
-      let nameNode = node.childForFieldName?.('name');
-      if (!nameNode) {
-        for (let i = 0; i < node.childCount; i++) {
-          const c = node.child(i);
-          if (
-            c?.type === 'identifier' ||
-            c?.type === 'property_identifier' ||
-            c?.type === 'simple_identifier'
-          ) {
-            nameNode = c;
-            break;
-          }
-        }
-      }
-      funcName = nameNode?.text;
-    }
-  } else if (node.type === 'impl_item') {
-    let funcItem: SyntaxNode | null = null;
-    for (let i = 0; i < node.childCount; i++) {
-      const c = node.child(i);
-      if (c?.type === 'function_item') {
-        funcItem = c;
-        break;
-      }
-    }
-    if (funcItem) {
-      let nameNode = funcItem.childForFieldName?.('name');
-      if (!nameNode) {
-        for (let i = 0; i < funcItem.childCount; i++) {
-          const c = funcItem.child(i);
-          if (c?.type === 'identifier') {
-            nameNode = c;
-            break;
-          }
-        }
-      }
-      funcName = nameNode?.text;
-      label = 'Method';
-    }
-  } else if (node.type === 'method_definition') {
-    let nameNode = node.childForFieldName?.('name');
-    if (!nameNode) {
-      for (let i = 0; i < node.childCount; i++) {
-        const c = node.child(i);
-        if (c?.type === 'property_identifier') {
-          nameNode = c;
-          break;
-        }
-      }
-    }
-    funcName = nameNode?.text;
+  // Dart: method_signature wraps function_signature — unwrap to reach the name
+  if (node.type === 'method_signature') {
     label = 'Method';
-  } else if (node.type === 'method_declaration' || node.type === 'constructor_declaration') {
-    let nameNode = node.childForFieldName?.('name');
-    if (!nameNode) {
-      for (let i = 0; i < node.childCount; i++) {
-        const c = node.child(i);
-        if (c?.type === 'identifier') {
-          nameNode = c;
-          break;
-        }
-      }
-    }
-    funcName = nameNode?.text;
-    label = 'Method';
-  } else if (node.type === 'arrow_function' || node.type === 'function_expression') {
-    const parent = node.parent;
-    if (parent?.type === 'variable_declarator') {
-      let nameNode = parent.childForFieldName?.('name');
-      if (!nameNode) {
-        for (let i = 0; i < parent.childCount; i++) {
-          const c = parent.child(i);
-          if (c?.type === 'identifier') {
-            nameNode = c;
-            break;
-          }
-        }
-      }
-      funcName = nameNode?.text;
-    }
-  } else if (node.type === 'method' || node.type === 'singleton_method') {
-    let nameNode = node.childForFieldName?.('name');
-    if (!nameNode) {
-      for (let i = 0; i < node.childCount; i++) {
-        const c = node.child(i);
-        if (c?.type === 'identifier') {
-          nameNode = c;
-          break;
-        }
-      }
-    }
-    funcName = nameNode?.text;
-    label = 'Method';
-  } else if (node.type === 'function_signature') {
-    // Dart: top-level function signatures
-    let nameNode = node.childForFieldName?.('name');
-    if (!nameNode) {
-      for (let i = 0; i < node.childCount; i++) {
-        const c = node.child(i);
-        if (c?.type === 'identifier') {
-          nameNode = c;
-          break;
-        }
-      }
-    }
-    funcName = nameNode?.text ?? null;
-  } else if (node.type === 'method_signature') {
-    // Dart: method_signature wraps function_signature
     let funcSig: SyntaxNode | null = null;
     for (let i = 0; i < node.childCount; i++) {
       const c = node.child(i);
@@ -635,128 +446,33 @@ export const extractFunctionName = (
       }
       funcName = nameNode?.text ?? null;
     }
-    label = 'Method';
+    return { funcName, label };
   }
+
+  // Try 'name' field first (works for most languages: Go, Python, PHP, Java, Kotlin,
+  // C#, Dart function_signature, Swift simple_identifier, generic function_declaration)
+  let nameNode = node.childForFieldName?.('name');
+  if (!nameNode) {
+    // Fallback: scan for common identifier child types
+    for (let i = 0; i < node.childCount; i++) {
+      const c = node.child(i);
+      if (
+        c?.type === 'identifier' ||
+        c?.type === 'property_identifier' ||
+        c?.type === 'simple_identifier'
+      ) {
+        nameNode = c;
+        break;
+      }
+    }
+  }
+  funcName = nameNode?.text ?? null;
 
   return { funcName, label };
 };
 
 /** Argument list node types shared between countCallArguments and call-resolution helpers. */
 export const CALL_ARGUMENT_LIST_TYPES = new Set(['arguments', 'argument_list', 'value_arguments']);
-
-/** Parameter list node types used for arity counting. */
-const PARAM_LIST_TYPES = new Set([
-  'formal_parameters',
-  'parameters',
-  'parameter_list',
-  'function_parameters',
-  'method_parameters',
-  'function_value_parameters',
-  'formal_parameter_list', // Dart
-]);
-
-/** Node types that indicate variadic/rest parameters. */
-const VARIADIC_PARAM_TYPES = new Set([
-  'variadic_parameter_declaration', // Go
-  'variadic_parameter', // Rust
-  'spread_parameter', // Java
-  'list_splat_pattern', // Python
-  'dictionary_splat_pattern', // Python
-]);
-
-/**
- * Count the number of parameters on a method/function AST node.
- * Returns undefined for variadic signatures (same convention as MethodExtractor).
- * Used by call-resolution to compute arity suffixes for overload disambiguation.
- */
-export const countMethodParameters = (node: SyntaxNode | null | undefined): number | undefined => {
-  if (!node) return 0;
-
-  const findParamList = (current: SyntaxNode): SyntaxNode | null => {
-    for (const child of current.children) {
-      if (PARAM_LIST_TYPES.has(child.type)) return child;
-    }
-    for (const child of current.children) {
-      const nested = findParamList(child);
-      if (nested) return nested;
-    }
-    return null;
-  };
-
-  const parameterList = PARAM_LIST_TYPES.has(node.type)
-    ? node
-    : (node.childForFieldName?.('parameters') ?? findParamList(node));
-
-  let count = 0;
-  let isVariadic = false;
-
-  if (parameterList && PARAM_LIST_TYPES.has(parameterList.type)) {
-    for (const param of parameterList.namedChildren) {
-      if (param.type === 'comment') continue;
-      if (
-        param.text === 'self' ||
-        param.text === '&self' ||
-        param.text === '&mut self' ||
-        param.type === 'self_parameter'
-      )
-        continue;
-      // TypeScript: `this` parameter is a type constraint, not a real param
-      if (param.type === 'required_parameter') {
-        const patternNode = param.childForFieldName('pattern');
-        if (patternNode?.type === 'this') continue;
-      }
-      // Skip Kotlin default-value siblings that appear as named children
-      if (
-        param.type.endsWith('_literal') ||
-        param.type === 'call_expression' ||
-        param.type === 'navigation_expression' ||
-        param.type === 'prefix_expression' ||
-        param.type === 'parenthesized_expression'
-      )
-        continue;
-      if (VARIADIC_PARAM_TYPES.has(param.type)) {
-        isVariadic = true;
-        continue;
-      }
-      // TS/JS rest parameter
-      if (param.type === 'required_parameter' || param.type === 'optional_parameter') {
-        for (const child of param.children) {
-          if (child.type === 'rest_pattern') {
-            isVariadic = true;
-            break;
-          }
-        }
-        if (isVariadic) continue;
-      }
-      // Kotlin vararg
-      if (param.type === 'parameter' || param.type === 'formal_parameter') {
-        const prev = param.previousSibling;
-        if (prev?.type === 'parameter_modifiers' && prev.text.includes('vararg')) {
-          isVariadic = true;
-        }
-      }
-      count++;
-    }
-    // C/C++: bare `...` token
-    if (!isVariadic) {
-      for (const child of parameterList.children) {
-        if (!child.isNamed && child.text === '...') {
-          isVariadic = true;
-          break;
-        }
-      }
-    }
-  }
-
-  // Swift fallback: parameter nodes as direct children of function_declaration
-  if (!parameterList && count === 0) {
-    for (const child of node.namedChildren) {
-      if (child.type === 'parameter') count++;
-    }
-  }
-
-  return isVariadic ? undefined : count;
-};
 
 // ============================================================================
 // Generic AST traversal helpers (shared by parse-worker + php-helpers)

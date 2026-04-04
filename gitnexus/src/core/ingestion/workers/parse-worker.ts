@@ -46,7 +46,6 @@ import {
   findEnclosingClassInfo,
   type EnclosingClassInfo,
   getLabelFromCaptures,
-  countMethodParameters,
   findDescendant,
   extractStringContent,
   type SyntaxNode,
@@ -526,7 +525,7 @@ const findEnclosingFunctionId = (
   let current = node.parent;
   while (current) {
     if (FUNCTION_NODE_TYPES.has(current.type)) {
-      const { funcName, label } = extractFunctionName(current);
+      const { funcName, label } = extractFunctionName(current, provider);
       if (funcName) {
         // Apply labelOverride so label matches definition phase (e.g., Kotlin Function→Method).
         // null means "skip as definition" — keep original label for scope identification.
@@ -538,9 +537,26 @@ const findEnclosingFunctionId = (
         // Qualify with enclosing class to match definition-phase node IDs
         const classInfo = cachedFindEnclosingClassInfo(current, filePath);
         const qualifiedName = classInfo ? `${classInfo.className}.${funcName}` : funcName;
-        // Include #<arity> suffix to match definition-phase Method/Constructor IDs
-        const needsArity = finalLabel === 'Method' || finalLabel === 'Constructor';
-        const arity = needsArity ? countMethodParameters(current) : undefined;
+        // Include #<arity> suffix to match definition-phase Method/Constructor IDs.
+        // Use the same MethodExtractor (getMethodInfo) as the definition phase.
+        let arity: number | undefined;
+        if (finalLabel === 'Method' || finalLabel === 'Constructor') {
+          const classNode =
+            findEnclosingClassNode(current) ?? findClassNodeByQualifiedName(current);
+          if (classNode) {
+            const methodMap = getMethodInfo(classNode, provider, {
+              filePath,
+              language: getLanguageFromFilename(filePath),
+            });
+            const defLine = current.startPosition.row + 1;
+            const info = methodMap?.get(`${funcName}:${defLine}`);
+            if (info) {
+              arity = info.parameters.some((p) => p.isVariadic)
+                ? undefined
+                : info.parameters.length;
+            }
+          }
+        }
         const arityTag = arity !== undefined ? `#${arity}` : '';
         const result = generateId(finalLabel, `${filePath}:${qualifiedName}${arityTag}`);
         functionIdCache.set(node, result);
@@ -566,10 +582,26 @@ const findEnclosingFunctionId = (
         const qualifiedName = classInfo
           ? `${classInfo.className}.${customResult.funcName}`
           : customResult.funcName;
-        // Include #<arity> suffix to match definition-phase Method/Constructor IDs
+        // Include #<arity> suffix to match definition-phase Method/Constructor IDs.
         const sigNode = current.previousSibling ?? current;
-        const needsArity2 = finalLabel === 'Method' || finalLabel === 'Constructor';
-        const arity2 = needsArity2 ? countMethodParameters(sigNode) : undefined;
+        let arity2: number | undefined;
+        if (finalLabel === 'Method' || finalLabel === 'Constructor') {
+          const classNode2 =
+            findEnclosingClassNode(sigNode) ?? findClassNodeByQualifiedName(sigNode);
+          if (classNode2) {
+            const methodMap2 = getMethodInfo(classNode2, provider, {
+              filePath,
+              language: getLanguageFromFilename(filePath),
+            });
+            const defLine2 = sigNode.startPosition.row + 1;
+            const info2 = methodMap2?.get(`${customResult.funcName}:${defLine2}`);
+            if (info2) {
+              arity2 = info2.parameters.some((p) => p.isVariadic)
+                ? undefined
+                : info2.parameters.length;
+            }
+          }
+        }
         const arityTag2 = arity2 !== undefined ? `#${arity2}` : '';
         const result = generateId(finalLabel, `${filePath}:${qualifiedName}${arityTag2}`);
         functionIdCache.set(node, result);

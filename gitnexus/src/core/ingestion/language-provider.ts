@@ -104,6 +104,17 @@ interface LanguageProviderConfig {
     ancestorNode: SyntaxNode,
   ) => { funcName: string; label: NodeLabel } | null;
 
+  // ── Function name extraction ──────────────────────────────────────
+  /** Extract function name + label from an AST node during parent-walk.
+   *  Languages with non-standard AST structures (e.g. C/C++ declarator
+   *  unwrapping, Swift init/deinit, Rust impl_item) provide this hook
+   *  to replace the generic name-field lookup.
+   *  Return null to fall through to the generic extractor.
+   *  Default: undefined (generic extraction from 'name' field). */
+  readonly extractFunctionName?: (
+    node: SyntaxNode,
+  ) => { funcName: string | null; label: NodeLabel } | null;
+
   // ── Labels ────────────────────────────────────────────────────────
   /** Override the default node label for definition.function captures.
    *  Return null to skip (C/C++ duplicate), a different label to reclassify
