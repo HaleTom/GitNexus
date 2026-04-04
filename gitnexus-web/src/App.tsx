@@ -111,9 +111,9 @@ const AppContent = () => {
     const serverUrl = params.get('server') || window.location.origin;
     const projectParam = params.get('project') || undefined;
 
-    // Clean the URL so a refresh won't re-trigger auto-connect
-    const cleanUrl = window.location.pathname + window.location.hash;
-    window.history.replaceState(null, '', cleanUrl);
+    // Keep ?server= in the URL so F5 reconnects to the same server.
+    // autoConnectRan.current prevents re-trigger within the same session.
+    // handleServerConnect() will add/update ?project= after connecting.
 
     setProgress({
       phase: 'extracting',
@@ -219,7 +219,12 @@ const AppContent = () => {
           await handleServerConnect(result);
           setProgress(null);
           if (serverUrl) {
-            setServerBaseUrl(normalizeServerUrl(serverUrl));
+            const base = normalizeServerUrl(serverUrl);
+            setServerBaseUrl(base);
+            // Add ?server= so F5 reconnects to this server
+            const url = new URL(window.location.href);
+            url.searchParams.set('server', base);
+            window.history.replaceState(null, '', url.toString());
           }
         }}
       />
