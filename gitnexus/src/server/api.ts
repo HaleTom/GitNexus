@@ -1247,7 +1247,8 @@ export const createServer = async (port: number, host: string = '127.0.0.1') => 
   // to the caller instead of crashing with an unhandled 'error' event.
   await new Promise<void>((resolve, reject) => {
     const server = app.listen(port, host, () => {
-      console.log(`GitNexus server running on http://${host}:${port}`);
+      const displayHost = host === '::' || host === '0.0.0.0' ? 'localhost' : host;
+      console.log(`GitNexus server running on http://${displayHost}:${port}`);
       resolve();
     });
     server.on('error', (err) => reject(err));

@@ -14,7 +14,11 @@ process.on('unhandledRejection', (reason: any) => {
 
 export const serveCommand = async (options?: { port?: string; host?: string }) => {
   const port = Number(options?.port ?? 4747);
-  const host = options?.host ?? '127.0.0.1';
+  // Default to '::' (dual-stack) so the server is reachable via both 127.0.0.1
+  // and ::1.  Browsers may resolve 'localhost' to either address; binding only
+  // to 127.0.0.1 breaks IPv6-first systems and causes spurious CORS errors
+  // when the hosted frontend at gitnexus.vercel.app connects to localhost.
+  const host = options?.host ?? '::';
 
   try {
     await createServer(port, host);
