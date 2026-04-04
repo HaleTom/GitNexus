@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppStateProvider, useAppState } from './hooks/useAppState';
 import { DropZone } from './components/DropZone';
 import { LoadingOverlay } from './components/LoadingOverlay';
@@ -48,6 +48,7 @@ const AppContent = () => {
   } = useAppState();
 
   const graphCanvasRef = useRef<GraphCanvasHandle>(null);
+  const [serverDisconnected, setServerDisconnected] = useState(false);
 
   const handleServerConnect = useCallback(
     async (result: ConnectResult): Promise<void> => {
@@ -169,21 +170,18 @@ const AppContent = () => {
 
   // ── Server heartbeat: detect when server goes down while exploring ────────
   // Uses SSE (EventSource) for instant detection — no polling delay.
+  // On disconnect: show a reconnecting banner instead of resetting to onboarding.
+  // The heartbeat retries indefinitely with capped backoff and recovers automatically.
   useEffect(() => {
     if (viewMode !== 'exploring') return;
 
     const cleanup = connectHeartbeat(
-      () => {}, // onConnect — already connected, no action needed
-      () => {
-        // Server went down — return to onboarding
-        setViewMode('onboarding');
-        setGraph(null);
-        setProgress(null);
-      },
+      () => setServerDisconnected(false),
+      () => setServerDisconnected(true),
     );
 
     return cleanup;
-  }, [viewMode, setViewMode, setGraph, setProgress]);
+  }, [viewMode]);
 
   // Render based on view mode
   if (viewMode === 'onboarding') {
@@ -267,6 +265,12 @@ const AppContent = () => {
       </main>
 
       <StatusBar />
+
+      {serverDisconnected && (
+        <div className="fixed bottom-12 left-1/2 z-50 -translate-x-1/2 rounded-lg border border-yellow-500/30 bg-yellow-900/80 px-4 py-2 text-sm text-yellow-200 shadow-lg backdrop-blur">
+          Server connection lost — reconnecting&hellip;
+        </div>
+      )}
 
       {/* Settings Panel (modal) */}
       <SettingsPanel
