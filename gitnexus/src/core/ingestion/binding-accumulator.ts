@@ -175,6 +175,19 @@ export class BindingAccumulator {
   }
 
   /**
+   * Whether the accumulator has been disposed. Exposed for symmetry with
+   * `finalized` so debug tooling and future Phase 9 consumers can detect a
+   * disposed accumulator without inspecting empty state heuristically.
+   *
+   * Disposal and finalization are orthogonal: a disposed accumulator may or
+   * may not be finalized, and vice versa. See `dispose()` for the full
+   * lifecycle contract.
+   */
+  get disposed(): boolean {
+    return this._disposed;
+  }
+
+  /**
    * Rough memory estimate in bytes (intentionally pessimistic).
    * Formula: sum of (ENTRY_OVERHEAD + char bytes of scope+varName+typeName) per entry
    *          + MAP_ENTRY_OVERHEAD + char bytes of filePath per file.

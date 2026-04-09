@@ -355,7 +355,14 @@ const processParsingSequential = async (
       continue;
     }
 
-    // Build per-file type environment for FieldExtractor context (lightweight — skipped if no fieldExtractor)
+    // Build per-file type environment for FieldExtractor context (lightweight — skipped if no fieldExtractor).
+    //
+    // Note: this TypeEnv is intentionally NOT flushed into the BindingAccumulator.
+    // The accumulator feed happens later in `call-processor.ts` via its own
+    // `typeEnv.flush(accumulator)` call. Flushing here would double-count
+    // file-scope bindings and break the single-use invariant of `flush()`.
+    // See PR #743 (SM-14) and plan `docs/plans/2026-04-09-005-*.md` for the
+    // full accumulator lifecycle and flush-site ownership rules.
     const typeEnv = provider.fieldExtractor
       ? buildTypeEnv(tree, language, {
           enclosingFunctionFinder: provider.enclosingFunctionFinder,

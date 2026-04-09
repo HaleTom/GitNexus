@@ -1083,6 +1083,16 @@ async function runChunkedParseAndResolve(
     );
   }
 
+  // ── Finalize the accumulator before the read phase begins. All worker-path
+  //    appends (line ~934) and sequential-path flushes (via `processCalls` →
+  //    `typeEnv.flush()` earlier in this function) have completed by here,
+  //    so the finalize-write-lock is correct at this seam. Making the
+  //    lifecycle contract explicit — `append → finalize → consume → dispose`
+  //    — was a Codex adversarial review follow-up (plan 2026-04-09-005).
+  //    Previously `finalize()` was called much later in `runPipelineFromRepo`
+  //    after the enrichment loop had already read the mutable accumulator.
+  bindingAccumulator.finalize();
+
   // ── Worker path quality enrichment: merge file-scope bindings into ExportedTypeMap ──
   if (bindingAccumulator.fileCount > 0) {
     let enriched = 0;
@@ -1711,8 +1721,12 @@ export const runPipelineFromRepo = async (
       processORMQueries(graph, allORMQueries, isDev);
     }
 
-    // Finalize — no more appends allowed
-    bindingAccumulator.finalize();
+    // `bindingAccumulator.finalize()` was moved inside `runChunkedParseAndResolve`
+    // to immediately precede the enrichment loop — see the comment there for
+    // the PR #743 Codex adversarial review rationale. By the time execution
+    // reaches this point, the accumulator has already been finalized, consumed
+    // by the enrichment loop, and is ready for dispose() below after the dev
+    // telemetry log captures peak state.
 
     if (isDev && bindingAccumulator.totalBindings > 0) {
       const memKB = Math.round(bindingAccumulator.estimateMemoryBytes() / 1024);

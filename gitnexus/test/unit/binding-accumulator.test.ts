@@ -403,7 +403,13 @@ describe('BindingAccumulator', () => {
             fileMap = new Map();
             exportedTypeMap.set(filePath, fileMap);
           }
-          fileMap.set(name, type);
+          // Tier 0 priority guard: if the SymbolTable already populated an
+          // entry for this name, don't overwrite it. Mirrors
+          // `pipeline.ts:1104-1108` — without this, a worker-path binding
+          // could clobber a higher-quality Tier 0 SymbolTable entry.
+          if (!fileMap.has(name)) {
+            fileMap.set(name, type);
+          }
         }
       }
     }
@@ -496,6 +502,44 @@ describe('BindingAccumulator', () => {
       // unmatched entry.
       expect(() => runEnrichmentLoop(acc, nodesById, exportedTypeMap)).not.toThrow();
       expect(exportedTypeMap.has('src/missing.ts')).toBe(false);
+    });
+
+    it('does not overwrite existing SymbolTable entry (Tier 0 priority)', () => {
+      // When the SymbolTable's tier-0 extraction pass has already populated
+      // an entry for a name, the accumulator enrichment loop must NOT
+      // overwrite it with a (lower-quality) worker-path binding. Guards
+      // against `pipeline.ts:1104-1108` regressing the priority check.
+      const acc = new BindingAccumulator();
+      acc.appendFile('src/utils.ts', [
+        { scope: '', varName: 'helper', typeName: 'WorkerInferredType' },
+      ]);
+      acc.finalize();
+
+      // Pre-populate exportedTypeMap to simulate what SymbolTable would
+      // have written in the tier-0 pass.
+      const exportedTypeMap = new Map<string, Map<string, string>>([
+        ['src/utils.ts', new Map([['helper', 'SymbolTableAuthoritativeType']])],
+      ]);
+
+      const nodesById = new Map<string, MockGraphNode>([
+        [
+          'Function:src/utils.ts:helper',
+          {
+            id: 'Function:src/utils.ts:helper',
+            label: 'Function',
+            name: 'helper',
+            filePath: 'src/utils.ts',
+            isExported: true,
+          },
+        ],
+      ]);
+
+      runEnrichmentLoop(acc, nodesById, exportedTypeMap);
+
+      // Tier 0 wins — the authoritative SymbolTable type survives.
+      expect(exportedTypeMap.get('src/utils.ts')?.get('helper')).toBe(
+        'SymbolTableAuthoritativeType',
+      );
     });
   });
 
