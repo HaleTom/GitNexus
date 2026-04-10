@@ -380,3 +380,140 @@ describe('Phase 9 — Cross-File Call-Result Binding: Rust', () => {
     expect(saveCall).toBeDefined();
   });
 });
+
+// ── R5: Missing language coverage (PR #763 review finding #5) ────────────
+
+describe('Phase 9 — Cross-File Call-Result Binding: JavaScript', () => {
+  let result: PipelineResult;
+
+  beforeAll(async () => {
+    result = await runPipelineFromRepo(path.join(CROSS_FILE_FIXTURES, 'js-cross-file'), () => {});
+  }, 60000);
+
+  it('detects User class with save and getName methods', () => {
+    expect(getNodesByLabel(result, 'Class')).toContain('User');
+    expect(getNodesByLabel(result, 'Method')).toContain('save');
+    expect(getNodesByLabel(result, 'Method')).toContain('getName');
+  });
+
+  it('detects getUser factory and run function', () => {
+    expect(getNodesByLabel(result, 'Function')).toContain('getUser');
+    expect(getNodesByLabel(result, 'Function')).toContain('run');
+  });
+
+  it('resolves u.save() in run() to User#save via cross-file return type', () => {
+    const calls = getRelationships(result, 'CALLS');
+    const saveCall = calls.find(
+      (c) => c.target === 'save' && c.source === 'run' && c.targetFilePath.includes('models'),
+    );
+    expect(saveCall).toBeDefined();
+  });
+});
+
+describe('Phase 9 — Cross-File Call-Result Binding: C++', () => {
+  let result: PipelineResult;
+
+  beforeAll(async () => {
+    result = await runPipelineFromRepo(path.join(CROSS_FILE_FIXTURES, 'cpp-cross-file'), () => {});
+  }, 60000);
+
+  it('detects User class with save and get_name methods', () => {
+    expect(getNodesByLabel(result, 'Class')).toContain('User');
+    expect(getNodesByLabel(result, 'Method')).toContain('save');
+    expect(getNodesByLabel(result, 'Method')).toContain('get_name');
+  });
+
+  it('detects get_user factory function', () => {
+    expect(getNodesByLabel(result, 'Function')).toContain('get_user');
+  });
+
+  it('resolves user.save() in process() to User#save via cross-file return type', () => {
+    const calls = getRelationships(result, 'CALLS');
+    const saveCall = calls.find(
+      (c) => c.target === 'save' && c.source === 'process' && c.targetFilePath.includes('user'),
+    );
+    expect(saveCall).toBeDefined();
+  });
+});
+
+describe('Phase 9 — Cross-File Call-Result Binding: C#', () => {
+  let result: PipelineResult;
+
+  beforeAll(async () => {
+    result = await runPipelineFromRepo(
+      path.join(CROSS_FILE_FIXTURES, 'csharp-cross-file'),
+      () => {},
+    );
+  }, 60000);
+
+  it('detects User class with Save and GetName methods', () => {
+    expect(getNodesByLabel(result, 'Class')).toContain('User');
+    expect(getNodesByLabel(result, 'Method')).toContain('Save');
+    expect(getNodesByLabel(result, 'Method')).toContain('GetName');
+  });
+
+  it('detects GetUser factory and Run method', () => {
+    expect(getNodesByLabel(result, 'Method')).toContain('GetUser');
+    expect(getNodesByLabel(result, 'Method')).toContain('Run');
+  });
+
+  it('resolves u.Save() in Run() to User#Save via cross-file return type', () => {
+    const calls = getRelationships(result, 'CALLS');
+    const saveCall = calls.find(
+      (c) => c.target === 'Save' && c.source === 'Run' && c.targetFilePath.includes('User'),
+    );
+    expect(saveCall).toBeDefined();
+  });
+});
+
+describe('Phase 9 — Cross-File Call-Result Binding: PHP', () => {
+  let result: PipelineResult;
+
+  beforeAll(async () => {
+    result = await runPipelineFromRepo(path.join(CROSS_FILE_FIXTURES, 'php-cross-file'), () => {});
+  }, 60000);
+
+  it('detects User class with save and getName methods', () => {
+    expect(getNodesByLabel(result, 'Class')).toContain('User');
+    expect(getNodesByLabel(result, 'Method')).toContain('save');
+    expect(getNodesByLabel(result, 'Method')).toContain('getName');
+  });
+
+  it('detects getUser factory function', () => {
+    expect(getNodesByLabel(result, 'Function')).toContain('getUser');
+  });
+
+  it('resolves $u->save() in run() to User#save via cross-file return type', () => {
+    const calls = getRelationships(result, 'CALLS');
+    const saveCall = calls.find(
+      (c) => c.target === 'save' && c.source === 'run' && c.targetFilePath.includes('User'),
+    );
+    expect(saveCall).toBeDefined();
+  });
+});
+
+describe('Phase 9 — Cross-File Call-Result Binding: Ruby', () => {
+  let result: PipelineResult;
+
+  beforeAll(async () => {
+    result = await runPipelineFromRepo(path.join(CROSS_FILE_FIXTURES, 'rb-cross-file'), () => {});
+  }, 60000);
+
+  it('detects User class with save and get_name methods', () => {
+    expect(getNodesByLabel(result, 'Class')).toContain('User');
+    expect(getNodesByLabel(result, 'Method')).toContain('save');
+    expect(getNodesByLabel(result, 'Method')).toContain('get_name');
+  });
+
+  it('detects get_user factory method', () => {
+    expect(getNodesByLabel(result, 'Method')).toContain('get_user');
+  });
+
+  it('resolves user.save in process() to User#save via cross-file return type', () => {
+    const calls = getRelationships(result, 'CALLS');
+    const saveCall = calls.find(
+      (c) => c.target === 'save' && c.source === 'process' && c.targetFilePath.includes('models'),
+    );
+    expect(saveCall).toBeDefined();
+  });
+});

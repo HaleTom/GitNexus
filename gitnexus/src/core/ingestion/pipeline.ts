@@ -1003,9 +1003,15 @@ async function runChunkedParseAndResolve(
         // Phase 9: pass the accumulator so processCallsFromExtracted can fall back
         // to file-scope TypeEnv bindings when the SymbolTable lacks a return type
         // for a cross-file callee (e.g. var x = getUser() → x: User).
-        // The accumulator is populated but not yet finalized at this seam — all
-        // worker-path appendFile calls complete in the chunk loop above, so every
-        // file-scope binding is available here via fileScopeEntries().
+        //
+        // Lifecycle ordering: the accumulator is populated but NOT yet finalized
+        // at this seam. finalize() is called later (after the sequential-path
+        // processCalls which also appends via typeEnv.flush()). Moving finalize()
+        // before this call would break sequential-path repos. Pre-finalize reads
+        // are safe because finalize() is a write-lock-only operation with no side
+        // effects on stored data. All worker-path appendFile calls complete in the
+        // chunk loop above, so every worker-contributed binding is available via
+        // fileScopeGet().
         bindingAccumulator,
       );
     }
@@ -1016,6 +1022,7 @@ async function runChunkedParseAndResolve(
         deferredAssignments,
         ctx,
         deferredConstructorBindings.length > 0 ? deferredConstructorBindings : undefined,
+        bindingAccumulator, // Phase 9 fallback parity with processCallsFromExtracted (R3)
       );
     }
   } finally {
