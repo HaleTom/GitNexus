@@ -1460,8 +1460,11 @@ export const createServer = async (port: number, host: string = '127.0.0.1') => 
                   rows.map((r: any) => r.nodeId ?? r[0]).filter(Boolean),
                 );
               }
-            } catch {
-              /* CodeEmbedding table may not exist yet */
+            } catch (err: any) {
+              // Swallow only "table does not exist" — let real connection errors propagate
+              if (!err?.message?.includes('does not exist') && !err?.message?.includes('not found')) {
+                throw err;
+              }
             }
             await runEmbeddingPipeline(executeQuery, executeWithReusedStatement, (p) => {
               embedJobManager.updateJob(job.id, {
