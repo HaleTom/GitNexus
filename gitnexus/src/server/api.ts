@@ -1452,39 +1452,44 @@ export const createServer = async (port: number, host: string = '127.0.0.1') => 
             // Skip nodes that already have embeddings — Kuzu forbids SET on vector-indexed properties.
             let skipNodeIds: Set<string> | undefined;
             try {
-              const rows = await executeQuery(
-                'MATCH (e:CodeEmbedding) RETURN e.nodeId AS nodeId',
-              );
+              const rows = await executeQuery('MATCH (e:CodeEmbedding) RETURN e.nodeId AS nodeId');
               if (rows && rows.length > 0) {
-                skipNodeIds = new Set(
-                  rows.map((r: any) => r.nodeId ?? r[0]).filter(Boolean),
-                );
+                skipNodeIds = new Set(rows.map((r: any) => r.nodeId ?? r[0]).filter(Boolean));
               }
             } catch (err: any) {
               // Swallow only "table does not exist" — let real connection errors propagate
-              if (!err?.message?.includes('does not exist') && !err?.message?.includes('not found')) {
+              if (
+                !err?.message?.includes('does not exist') &&
+                !err?.message?.includes('not found')
+              ) {
                 throw err;
               }
             }
-            await runEmbeddingPipeline(executeQuery, executeWithReusedStatement, (p) => {
-              embedJobManager.updateJob(job.id, {
-                progress: {
-                  phase:
-                    p.phase === 'ready' ? 'complete' : p.phase === 'error' ? 'failed' : p.phase,
-                  percent: p.percent,
-                  message:
-                    p.phase === 'loading-model'
-                      ? 'Loading embedding model...'
-                      : p.phase === 'embedding'
-                        ? `Embedding nodes (${p.percent}%)...`
-                        : p.phase === 'indexing'
-                          ? 'Creating vector index...'
-                          : p.phase === 'ready'
-                            ? 'Embeddings complete'
-                            : `${p.phase} (${p.percent}%)`,
-                },
-              });
-            }, {}, skipNodeIds);
+            await runEmbeddingPipeline(
+              executeQuery,
+              executeWithReusedStatement,
+              (p) => {
+                embedJobManager.updateJob(job.id, {
+                  progress: {
+                    phase:
+                      p.phase === 'ready' ? 'complete' : p.phase === 'error' ? 'failed' : p.phase,
+                    percent: p.percent,
+                    message:
+                      p.phase === 'loading-model'
+                        ? 'Loading embedding model...'
+                        : p.phase === 'embedding'
+                          ? `Embedding nodes (${p.percent}%)...`
+                          : p.phase === 'indexing'
+                            ? 'Creating vector index...'
+                            : p.phase === 'ready'
+                              ? 'Embeddings complete'
+                              : `${p.phase} (${p.percent}%)`,
+                  },
+                });
+              },
+              {},
+              skipNodeIds,
+            );
           });
 
           clearTimeout(embedTimeout);
