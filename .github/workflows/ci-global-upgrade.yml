@@ -4,23 +4,11 @@ name: Global Install Upgrade Smoke
 # cleanly over a prior global install. Prior precedent: issue #836 and PR #843's
 # incomplete fix slipped past CI because no global-upgrade test existed.
 #
-# Concurrency convention: see CONTRIBUTING.md → "GitHub Actions — Concurrency Convention".
-# Literal "CIGU-" prefix (safe in reusable-workflow context, per ci.yml comments).
+# Reusable workflow — only callable from ci.yml. Concurrency is governed by the
+# caller (ci.yml), so no `concurrency:` block here.
 
 on:
-  pull_request:
-    paths:
-      - 'gitnexus/package.json'
-      - 'gitnexus/.npmignore'
-      - 'gitnexus/scripts/**'
-      - 'gitnexus/vendor/**'
-      - '.github/workflows/ci-global-upgrade.yml'
-  workflow_dispatch:
   workflow_call:
-
-concurrency:
-  group: ${{ (github.event_name == 'pull_request' || github.event_name == 'push') && format('CIGU-{0}', github.ref) || format('CIGU-nested-{0}', github.run_id) }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   global-upgrade:
@@ -32,17 +20,17 @@ jobs:
         # surface for npm global-install rmdir behavior. Linux and Windows
         # provide cross-platform regression coverage.
         os: [macos-latest, ubuntu-latest, windows-latest]
-        # Prior version that must be upgraded OVER. If this version changes,
-        # update here. Should be a published rc that preceded the fix.
+        # Prior version that must be upgraded OVER. Should be a published rc
+        # that preceded the fix. Bump when a known-bad version changes.
         prior: ['1.6.2-rc.8']
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.3.0
+      - uses: ./.github/actions/setup-gitnexus
         with:
-          node-version: '22'
+          build: 'false'
 
       - name: Install prior published version globally
         run: npm install -g gitnexus@${{ matrix.prior }}
@@ -52,9 +40,7 @@ jobs:
 
       - name: Pack current branch
         working-directory: gitnexus
-        run: |
-          npm install
-          npm pack
+        run: npm pack
         shell: bash
 
       - name: Compute packed tarball path
@@ -101,15 +87,13 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.3.0
+      - uses: ./.github/actions/setup-gitnexus
         with:
-          node-version: '22'
+          build: 'false'
 
       - name: Pack current branch
         working-directory: gitnexus
-        run: |
-          npm install
-          npm pack
+        run: npm pack
         shell: bash
 
       - name: Compute packed tarball path
