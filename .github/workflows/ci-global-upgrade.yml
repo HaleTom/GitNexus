@@ -53,25 +53,26 @@ jobs:
 
       - name: Upgrade over prior version (the actual regression test)
         run: npm install -g "${{ steps.tarball.outputs.path }}"
+        shell: bash
 
       - name: Verify upgraded version runs
         run: gitnexus --version
 
-      - name: Verify no vendor build artifacts block rmdir
+      - name: Verify vendor/ has no nested node_modules after install
         shell: bash
         run: |
-          # Best-effort: locate the global install and confirm that vendor/
-          # contains only source, not install-time artifacts.
+          # The original #836 bug was about vendor/tree-sitter-proto/node_modules/
+          # blocking rmdir on upgrade. That is what the fix eliminates. A
+          # vendor/tree-sitter-proto/build/ directory can still appear because
+          # node-gyp-build compiles through the npm-created symlink; the
+          # contents are plain object files and .node binaries that rmdir
+          # handles fine, evidenced by this test getting past the upgrade step.
           GLOBAL_PREFIX=$(npm root -g)
           if [ -d "$GLOBAL_PREFIX/gitnexus/vendor/tree-sitter-proto" ]; then
             echo "=== Contents of global vendor/tree-sitter-proto/ ==="
             ls -la "$GLOBAL_PREFIX/gitnexus/vendor/tree-sitter-proto/"
             if [ -d "$GLOBAL_PREFIX/gitnexus/vendor/tree-sitter-proto/node_modules" ]; then
-              echo "::error::vendor/tree-sitter-proto/node_modules/ was created — upgrade hazard reintroduced"
-              exit 1
-            fi
-            if [ -d "$GLOBAL_PREFIX/gitnexus/vendor/tree-sitter-proto/build" ]; then
-              echo "::error::vendor/tree-sitter-proto/build/ was created — upgrade hazard reintroduced"
+              echo "::error::vendor/tree-sitter-proto/node_modules/ was created — this is the #836 hazard"
               exit 1
             fi
           fi
@@ -106,6 +107,7 @@ jobs:
 
       - name: Install globally with --ignore-scripts
         run: npm install -g --ignore-scripts "${{ steps.tarball.outputs.path }}"
+        shell: bash
 
       - name: Verify CLI boots without postinstall (proto parsing may be unavailable)
         run: gitnexus --version
