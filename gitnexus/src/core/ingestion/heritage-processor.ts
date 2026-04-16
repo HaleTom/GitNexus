@@ -407,35 +407,19 @@ export async function extractExtractedHeritageFromFiles(
       });
 
       if (captureMap['heritage.class']) {
-        if (captureMap['heritage.extends']) {
-          const extendsNode = captureMap['heritage.extends'];
-          const fieldDecl = extendsNode.parent;
-          const isNamedField =
-            fieldDecl?.type === 'field_declaration' && fieldDecl.childForFieldName('name');
-          if (!isNamedField) {
+        if (provider.heritageExtractor) {
+          const heritageItems = provider.heritageExtractor.extract(captureMap, {
+            filePath: file.path,
+            language,
+          });
+          for (const item of heritageItems) {
             out.push({
               filePath: file.path,
-              className: captureMap['heritage.class'].text,
-              parentName: captureMap['heritage.extends'].text,
-              kind: 'extends',
+              className: item.className,
+              parentName: item.parentName,
+              kind: item.kind,
             });
           }
-        }
-        if (captureMap['heritage.implements']) {
-          out.push({
-            filePath: file.path,
-            className: captureMap['heritage.class'].text,
-            parentName: captureMap['heritage.implements'].text,
-            kind: 'implements',
-          });
-        }
-        if (captureMap['heritage.trait']) {
-          out.push({
-            filePath: file.path,
-            className: captureMap['heritage.class'].text,
-            parentName: captureMap['heritage.trait'].text,
-            kind: 'trait-impl',
-          });
         }
       }
     }

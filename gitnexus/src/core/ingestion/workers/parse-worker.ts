@@ -1699,6 +1699,26 @@ const processFileGroup = (
           if (callNameNode) {
             const calledName = callNameNode.text;
 
+            // Check heritage extractor for call-based heritage (e.g., Ruby include/extend/prepend)
+            if (provider.heritageExtractor?.extractFromCall) {
+              const heritageItems = provider.heritageExtractor.extractFromCall(
+                calledName,
+                captureMap['call']!,
+                { filePath: file.path, language },
+              );
+              if (heritageItems && heritageItems.length > 0) {
+                for (const item of heritageItems) {
+                  result.heritage.push({
+                    filePath: file.path,
+                    className: item.className,
+                    parentName: item.parentName,
+                    kind: item.kind,
+                  });
+                }
+                continue;
+              }
+            }
+
             // Dispatch: route language-specific calls (heritage, properties, imports)
             const routed = callRouter?.(calledName, captureMap['call']);
             if (routed) {
@@ -1878,40 +1898,24 @@ const processFileGroup = (
         continue;
       }
 
-      // Extract heritage (extends/implements)
+      // Extract heritage (extends/implements) via provider heritage extractor
       if (captureMap['heritage.class']) {
-        if (captureMap['heritage.extends']) {
-          // Go struct embedding: the query matches ALL field_declarations with
-          // type_identifier, but only anonymous fields (no name) are embedded.
-          // Named fields like `Breed string` also match — skip them.
-          const extendsNode = captureMap['heritage.extends'];
-          const fieldDecl = extendsNode.parent;
-          const isNamedField =
-            fieldDecl?.type === 'field_declaration' && fieldDecl.childForFieldName('name');
-          if (!isNamedField) {
+        if (provider.heritageExtractor) {
+          const heritageItems = provider.heritageExtractor.extract(captureMap, {
+            filePath: file.path,
+            language,
+          });
+          for (const item of heritageItems) {
             result.heritage.push({
               filePath: file.path,
-              className: captureMap['heritage.class'].text,
-              parentName: captureMap['heritage.extends'].text,
-              kind: 'extends',
+              className: item.className,
+              parentName: item.parentName,
+              kind: item.kind,
             });
           }
-        }
-        if (captureMap['heritage.implements']) {
-          result.heritage.push({
-            filePath: file.path,
-            className: captureMap['heritage.class'].text,
-            parentName: captureMap['heritage.implements'].text,
-            kind: 'implements',
-          });
-        }
-        if (captureMap['heritage.trait']) {
-          result.heritage.push({
-            filePath: file.path,
-            className: captureMap['heritage.class'].text,
-            parentName: captureMap['heritage.trait'].text,
-            kind: 'trait-impl',
-          });
+          if (heritageItems.length > 0) {
+            continue;
+          }
         }
         if (
           captureMap['heritage.extends'] ||

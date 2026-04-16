@@ -27,6 +27,8 @@ import { createMethodExtractor } from '../method-extractors/generic.js';
 import { kotlinMethodConfig } from '../method-extractors/configs/jvm.js';
 import { createVariableExtractor } from '../variable-extractors/generic.js';
 import { kotlinVariableConfig } from '../variable-extractors/configs/jvm.js';
+import { createHeritageExtractor } from '../heritage-extractors/generic.js';
+import { kotlinHeritageConfig } from '../heritage-extractors/configs/jvm.js';
 
 /** Check if a Kotlin function_declaration capture is inside a class_body (i.e., a method).
  *  Kotlin grammar uses function_declaration for both top-level functions and class methods.
@@ -116,6 +118,7 @@ export const kotlinProvider = defineLanguage({
   methodExtractor: createMethodExtractor(kotlinMethodConfig),
   variableExtractor: createVariableExtractor(kotlinVariableConfig),
   classExtractor: createClassExtractor(kotlinClassConfig),
+  heritageExtractor: createHeritageExtractor(kotlinHeritageConfig),
   builtInNames: BUILT_INS,
   labelOverride: (functionNode, defaultLabel) => {
     if (defaultLabel !== 'Function') return defaultLabel;

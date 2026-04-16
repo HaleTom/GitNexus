@@ -43,6 +43,8 @@ import { createVariableExtractor } from '../variable-extractors/generic.js';
 import { cVariableConfig, cppVariableConfig } from '../variable-extractors/configs/c-cpp.js';
 import { createCallExtractor } from '../call-extractors/generic.js';
 import { cCallConfig, cppCallConfig } from '../call-extractors/configs/c-cpp.js';
+import { createHeritageExtractor } from '../heritage-extractors/generic.js';
+import { cHeritageConfig, cppHeritageConfig } from '../heritage-extractors/configs/c-cpp.js';
 
 const C_BUILT_INS: ReadonlySet<string> = new Set([
   'printf',
@@ -329,6 +331,7 @@ export const cProvider = defineLanguage({
   }),
   variableExtractor: createVariableExtractor(cVariableConfig),
   classExtractor: cClassExtractor,
+  heritageExtractor: createHeritageExtractor(cHeritageConfig),
   labelOverride: cppLabelOverride,
   builtInNames: C_BUILT_INS,
 });
@@ -350,6 +353,7 @@ export const cppProvider = defineLanguage({
   }),
   variableExtractor: createVariableExtractor(cppVariableConfig),
   classExtractor: cppClassExtractor,
+  heritageExtractor: createHeritageExtractor(cppHeritageConfig),
   labelOverride: cppLabelOverride,
   builtInNames: C_BUILT_INS,
 });

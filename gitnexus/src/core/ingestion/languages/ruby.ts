@@ -27,6 +27,8 @@ import { createVariableExtractor } from '../variable-extractors/generic.js';
 import { rubyVariableConfig } from '../variable-extractors/configs/ruby.js';
 import { createCallExtractor } from '../call-extractors/generic.js';
 import { rubyCallConfig } from '../call-extractors/configs/ruby.js';
+import { createHeritageExtractor } from '../heritage-extractors/generic.js';
+import { rubyHeritageConfig } from '../heritage-extractors/configs/ruby.js';
 
 /** Ruby method/singleton_method: extract name from 'name' field, label as Method. */
 const rubyExtractFunctionName = (
@@ -137,5 +139,6 @@ export const rubyProvider = defineLanguage({
   }),
   variableExtractor: createVariableExtractor(rubyVariableConfig),
   classExtractor: createClassExtractor(rubyClassConfig),
+  heritageExtractor: createHeritageExtractor(rubyHeritageConfig),
   builtInNames: BUILT_INS,
 });
