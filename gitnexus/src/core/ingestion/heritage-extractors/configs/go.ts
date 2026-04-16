@@ -19,9 +19,6 @@ export const goHeritageConfig: HeritageExtractionConfig = {
 
   shouldSkipExtends(extendsNode) {
     const fieldDecl = extendsNode.parent;
-    return (
-      fieldDecl?.type === 'field_declaration' &&
-      fieldDecl.childForFieldName?.('name') != null
-    );
+    return fieldDecl?.type === 'field_declaration' && fieldDecl.childForFieldName?.('name') != null;
   },
 };

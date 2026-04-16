@@ -62,10 +62,7 @@ function buildCaptureMap(entries: Record<string, MockNode | undefined>): Capture
 }
 
 /** Default context for testing. */
-function ctx(
-  filePath = 'Test.java',
-  language = SupportedLanguages.Java,
-): HeritageExtractorContext {
+function ctx(filePath = 'Test.java', language = SupportedLanguages.Java): HeritageExtractorContext {
   return { filePath, language };
 }
 
@@ -143,9 +140,7 @@ describe('HeritageExtractor.extract', () => {
       'heritage.extends': makeNode('Parent'),
     });
     const result = extractor.extract(captures, ctx());
-    expect(result).toEqual([
-      { className: 'Child', parentName: 'Parent', kind: 'extends' },
-    ]);
+    expect(result).toEqual([{ className: 'Child', parentName: 'Parent', kind: 'extends' }]);
   });
 
   it('extracts implements heritage', () => {
@@ -166,9 +161,7 @@ describe('HeritageExtractor.extract', () => {
       'heritage.trait': makeNode('Display'),
     });
     const result = rustExtractor.extract(captures, ctx('main.rs', SupportedLanguages.Rust));
-    expect(result).toEqual([
-      { className: 'MyStruct', parentName: 'Display', kind: 'trait-impl' },
-    ]);
+    expect(result).toEqual([{ className: 'MyStruct', parentName: 'Display', kind: 'trait-impl' }]);
   });
 
   it('extracts both extends and implements from same match', () => {
@@ -214,9 +207,7 @@ describe('Go HeritageExtractor — shouldSkipExtends', () => {
       'heritage.extends': typeNode as unknown as CaptureMap[string],
     });
     const result = extractor.extract(captures, ctx('main.go', SupportedLanguages.Go));
-    expect(result).toEqual([
-      { className: 'Dog', parentName: 'Animal', kind: 'extends' },
-    ]);
+    expect(result).toEqual([{ className: 'Dog', parentName: 'Animal', kind: 'extends' }]);
   });
 
   it('skips named struct fields (Breed string)', () => {
@@ -237,9 +228,7 @@ describe('Go HeritageExtractor — shouldSkipExtends', () => {
       'heritage.extends': orphanNode as unknown as CaptureMap[string],
     });
     const result = extractor.extract(captures, ctx('main.go', SupportedLanguages.Go));
-    expect(result).toEqual([
-      { className: 'Foo', parentName: 'Embedded', kind: 'extends' },
-    ]);
+    expect(result).toEqual([{ className: 'Foo', parentName: 'Embedded', kind: 'extends' }]);
   });
 });
 
@@ -268,8 +257,7 @@ describe('Ruby HeritageExtractor — call-based heritage', () => {
             type: enclosingType,
             text: '',
             parent: null,
-            childForFieldName: (name: string) =>
-              name === 'name' ? classNameNode : undefined,
+            childForFieldName: (name: string) => (name === 'name' ? classNameNode : undefined),
           }
         : null;
 
@@ -284,8 +272,7 @@ describe('Ruby HeritageExtractor — call-based heritage', () => {
       type: 'call',
       text: '',
       parent: bodyNode,
-      childForFieldName: (name: string) =>
-        name === 'arguments' ? argList : undefined,
+      childForFieldName: (name: string) => (name === 'arguments' ? argList : undefined),
     };
     return callNode;
   }
@@ -308,9 +295,7 @@ describe('Ruby HeritageExtractor — call-based heritage', () => {
   it('extracts include heritage with single constant arg', () => {
     const callNode = makeCallNode([makeConstantArg('Serializable')], 'class', 'User');
     const result = extractor.extractFromCall!('include', callNode as any, rubyCtx);
-    expect(result).toEqual([
-      { className: 'User', parentName: 'Serializable', kind: 'include' },
-    ]);
+    expect(result).toEqual([{ className: 'User', parentName: 'Serializable', kind: 'include' }]);
   });
 
   it('extracts extend heritage with scope_resolution arg', () => {
@@ -328,17 +313,13 @@ describe('Ruby HeritageExtractor — call-based heritage', () => {
   it('extracts prepend heritage', () => {
     const callNode = makeCallNode([makeConstantArg('Instrumented')], 'class', 'Service');
     const result = extractor.extractFromCall!('prepend', callNode as any, rubyCtx);
-    expect(result).toEqual([
-      { className: 'Service', parentName: 'Instrumented', kind: 'prepend' },
-    ]);
+    expect(result).toEqual([{ className: 'Service', parentName: 'Instrumented', kind: 'prepend' }]);
   });
 
   it('extracts include inside a module', () => {
     const callNode = makeCallNode([makeConstantArg('Helpers')], 'module', 'AppHelper');
     const result = extractor.extractFromCall!('include', callNode as any, rubyCtx);
-    expect(result).toEqual([
-      { className: 'AppHelper', parentName: 'Helpers', kind: 'include' },
-    ]);
+    expect(result).toEqual([{ className: 'AppHelper', parentName: 'Helpers', kind: 'include' }]);
   });
 
   it('extracts multiple constant args as separate heritage items', () => {
@@ -362,8 +343,7 @@ describe('Ruby HeritageExtractor — call-based heritage', () => {
       type: 'call',
       text: '',
       parent: null,
-      childForFieldName: (name: string) =>
-        name === 'arguments' ? argList : undefined,
+      childForFieldName: (name: string) => (name === 'arguments' ? argList : undefined),
     };
     const result = extractor.extractFromCall!('include', callNode as any, rubyCtx);
     expect(result).toEqual([]);

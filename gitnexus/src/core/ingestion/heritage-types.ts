@@ -99,10 +99,6 @@ export interface HeritageExtractionConfig {
    */
   callBasedHeritage?: {
     readonly callNames: ReadonlySet<string>;
-    extract(
-      calledName: string,
-      callNode: SyntaxNode,
-      filePath: string,
-    ): HeritageInfo[];
+    extract(calledName: string, callNode: SyntaxNode, filePath: string): HeritageInfo[];
   };
 }
