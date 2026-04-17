@@ -7,11 +7,13 @@
  * field-extractors/generic.ts, call-extractors/generic.ts, and
  * variable-extractors/generic.ts.
  *
- * Define a HeritageExtractionConfig per language and generate extractors
- * from configs.  The factory creates a HeritageExtractor whose behaviour
- * is entirely driven by HeritageExtractionConfig.
+ * Languages with custom extraction hooks (Go: shouldSkipExtends, Ruby:
+ * callBasedHeritage) pass a full HeritageExtractionConfig.  Languages
+ * that use the default capture-based extraction can pass just the
+ * SupportedLanguages enum value — no per-language config file needed.
  */
 
+import type { SupportedLanguages } from 'gitnexus-shared';
 import type { CaptureMap } from '../language-provider.js';
 import type {
   HeritageExtractionConfig,
@@ -22,13 +24,22 @@ import type {
 import type { SyntaxNode } from '../utils/ast-helpers.js';
 
 /**
- * Create a HeritageExtractor from a declarative config.
+ * Create a HeritageExtractor from a declarative config or a language enum.
+ *
+ * When a full HeritageExtractionConfig is provided, custom hooks
+ * (shouldSkipExtends, callBasedHeritage) drive the extraction.
+ * When only a SupportedLanguages value is provided, the factory produces
+ * a default extractor that handles the standard @heritage.* captures.
  */
-export function createHeritageExtractor(config: HeritageExtractionConfig): HeritageExtractor {
-  const callNameSet = config.callBasedHeritage?.callNames;
+export function createHeritageExtractor(
+  config: HeritageExtractionConfig | SupportedLanguages,
+): HeritageExtractor {
+  const actualConfig: HeritageExtractionConfig =
+    typeof config === 'string' ? { language: config } : config;
+  const callNameSet = actualConfig.callBasedHeritage?.callNames;
 
   return {
-    language: config.language,
+    language: actualConfig.language,
 
     extract(captureMap: CaptureMap, context: HeritageExtractorContext): HeritageInfo[] {
       const classNode = captureMap['heritage.class'];
@@ -39,7 +50,7 @@ export function createHeritageExtractor(config: HeritageExtractionConfig): Herit
 
       const extendsNode = captureMap['heritage.extends'];
       if (extendsNode) {
-        if (!config.shouldSkipExtends?.(extendsNode)) {
+        if (!actualConfig.shouldSkipExtends?.(extendsNode)) {
           results.push({ className, parentName: extendsNode.text, kind: 'extends' });
         }
       }
@@ -65,7 +76,7 @@ export function createHeritageExtractor(config: HeritageExtractionConfig): Herit
             context: HeritageExtractorContext,
           ): HeritageInfo[] | null {
             if (!callNameSet.has(calledName)) return null;
-            return config.callBasedHeritage!.extract(calledName, callNode, context.filePath);
+            return actualConfig.callBasedHeritage!.extract(calledName, callNode, context.filePath);
           },
         }
       : {}),

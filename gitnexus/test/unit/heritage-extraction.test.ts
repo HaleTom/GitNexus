@@ -1,25 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createHeritageExtractor } from '../../src/core/ingestion/heritage-extractors/generic.js';
-import {
-  javaHeritageConfig,
-  kotlinHeritageConfig,
-} from '../../src/core/ingestion/heritage-extractors/configs/jvm.js';
-import { csharpHeritageConfig } from '../../src/core/ingestion/heritage-extractors/configs/csharp.js';
-import {
-  typescriptHeritageConfig,
-  javascriptHeritageConfig,
-} from '../../src/core/ingestion/heritage-extractors/configs/typescript-javascript.js';
-import {
-  cHeritageConfig,
-  cppHeritageConfig,
-} from '../../src/core/ingestion/heritage-extractors/configs/c-cpp.js';
-import { pythonHeritageConfig } from '../../src/core/ingestion/heritage-extractors/configs/python.js';
 import { rubyHeritageConfig } from '../../src/core/ingestion/heritage-extractors/configs/ruby.js';
-import { rustHeritageConfig } from '../../src/core/ingestion/heritage-extractors/configs/rust.js';
-import { dartHeritageConfig } from '../../src/core/ingestion/heritage-extractors/configs/dart.js';
 import { goHeritageConfig } from '../../src/core/ingestion/heritage-extractors/configs/go.js';
-import { phpHeritageConfig } from '../../src/core/ingestion/heritage-extractors/configs/php.js';
-import { swiftHeritageConfig } from '../../src/core/ingestion/heritage-extractors/configs/swift.js';
 import type {
   HeritageExtractionConfig,
   HeritageExtractorContext,
@@ -73,29 +55,37 @@ function ctx(filePath = 'Test.java', language = SupportedLanguages.Java): Herita
 
 describe('createHeritageExtractor', () => {
   it('creates an extractor from a minimal config', () => {
-    const extractor = createHeritageExtractor(javaHeritageConfig);
+    const extractor = createHeritageExtractor(SupportedLanguages.Java);
     expect(extractor).toBeDefined();
     expect(extractor.language).toBe(SupportedLanguages.Java);
     expect(typeof extractor.extract).toBe('function');
   });
 
-  it('accepts all currently registered language configs', () => {
-    const configs: HeritageExtractionConfig[] = [
-      javaHeritageConfig,
-      kotlinHeritageConfig,
-      csharpHeritageConfig,
-      typescriptHeritageConfig,
-      javascriptHeritageConfig,
-      cppHeritageConfig,
-      cHeritageConfig,
-      pythonHeritageConfig,
-      rubyHeritageConfig,
-      rustHeritageConfig,
-      dartHeritageConfig,
-      goHeritageConfig,
-      phpHeritageConfig,
-      swiftHeritageConfig,
+  it('creates an extractor from a language enum (default config)', () => {
+    const languages: SupportedLanguages[] = [
+      SupportedLanguages.Java,
+      SupportedLanguages.Kotlin,
+      SupportedLanguages.CSharp,
+      SupportedLanguages.TypeScript,
+      SupportedLanguages.JavaScript,
+      SupportedLanguages.CPlusPlus,
+      SupportedLanguages.C,
+      SupportedLanguages.Python,
+      SupportedLanguages.Rust,
+      SupportedLanguages.Dart,
+      SupportedLanguages.PHP,
+      SupportedLanguages.Swift,
     ];
+    for (const lang of languages) {
+      const extractor = createHeritageExtractor(lang);
+      expect(extractor.language, `${lang} extractor should have correct language`).toBe(lang);
+      expect(typeof extractor.extract).toBe('function');
+      expect(extractor.extractFromCall).toBeUndefined();
+    }
+  });
+
+  it('creates an extractor from full config with custom hooks', () => {
+    const configs: HeritageExtractionConfig[] = [goHeritageConfig, rubyHeritageConfig];
     for (const cfg of configs) {
       expect(
         () => createHeritageExtractor(cfg),
@@ -110,8 +100,8 @@ describe('createHeritageExtractor', () => {
     expect(typeof extractor.extractFromCall).toBe('function');
   });
 
-  it('does not set extractFromCall when callBasedHeritage is absent', () => {
-    const extractor = createHeritageExtractor(javaHeritageConfig);
+  it('does not set extractFromCall for default language extractors', () => {
+    const extractor = createHeritageExtractor(SupportedLanguages.Java);
     expect(extractor.extractFromCall).toBeUndefined();
   });
 });
@@ -121,7 +111,7 @@ describe('createHeritageExtractor', () => {
 // ---------------------------------------------------------------------------
 
 describe('HeritageExtractor.extract', () => {
-  const extractor = createHeritageExtractor(javaHeritageConfig);
+  const extractor = createHeritageExtractor(SupportedLanguages.Java);
 
   it('returns empty array when heritage.class is not present', () => {
     const captures = buildCaptureMap({});
@@ -156,7 +146,7 @@ describe('HeritageExtractor.extract', () => {
   });
 
   it('extracts trait-impl heritage', () => {
-    const rustExtractor = createHeritageExtractor(rustHeritageConfig);
+    const rustExtractor = createHeritageExtractor(SupportedLanguages.Rust);
     const captures = buildCaptureMap({
       'heritage.class': makeNode('MyStruct'),
       'heritage.trait': makeNode('Display'),
@@ -370,16 +360,6 @@ describe('Ruby HeritageExtractor — call-based heritage', () => {
 // ---------------------------------------------------------------------------
 
 describe('HeritageExtraction language configs', () => {
-  it('Java config has correct language', () => {
-    expect(javaHeritageConfig.language).toBe(SupportedLanguages.Java);
-    expect(javaHeritageConfig.shouldSkipExtends).toBeUndefined();
-    expect(javaHeritageConfig.callBasedHeritage).toBeUndefined();
-  });
-
-  it('Kotlin config has correct language', () => {
-    expect(kotlinHeritageConfig.language).toBe(SupportedLanguages.Kotlin);
-  });
-
   it('Go config has shouldSkipExtends hook', () => {
     expect(goHeritageConfig.language).toBe(SupportedLanguages.Go);
     expect(goHeritageConfig.shouldSkipExtends).toBeDefined();
@@ -394,44 +374,26 @@ describe('HeritageExtraction language configs', () => {
     );
   });
 
-  it('Swift config has correct language', () => {
-    expect(swiftHeritageConfig.language).toBe(SupportedLanguages.Swift);
-  });
-
-  it('Rust config has correct language', () => {
-    expect(rustHeritageConfig.language).toBe(SupportedLanguages.Rust);
-  });
-
-  it('TypeScript config has correct language', () => {
-    expect(typescriptHeritageConfig.language).toBe(SupportedLanguages.TypeScript);
-  });
-
-  it('JavaScript config has correct language', () => {
-    expect(javascriptHeritageConfig.language).toBe(SupportedLanguages.JavaScript);
-  });
-
-  it('C config has correct language', () => {
-    expect(cHeritageConfig.language).toBe(SupportedLanguages.C);
-  });
-
-  it('C++ config has correct language', () => {
-    expect(cppHeritageConfig.language).toBe(SupportedLanguages.CPlusPlus);
-  });
-
-  it('Python config has correct language', () => {
-    expect(pythonHeritageConfig.language).toBe(SupportedLanguages.Python);
-  });
-
-  it('PHP config has correct language', () => {
-    expect(phpHeritageConfig.language).toBe(SupportedLanguages.PHP);
-  });
-
-  it('Dart config has correct language', () => {
-    expect(dartHeritageConfig.language).toBe(SupportedLanguages.Dart);
-  });
-
-  it('C# config has correct language', () => {
-    expect(csharpHeritageConfig.language).toBe(SupportedLanguages.CSharp);
+  it('default language extractors have no custom hooks', () => {
+    const defaultLanguages: SupportedLanguages[] = [
+      SupportedLanguages.Java,
+      SupportedLanguages.Kotlin,
+      SupportedLanguages.CSharp,
+      SupportedLanguages.TypeScript,
+      SupportedLanguages.JavaScript,
+      SupportedLanguages.CPlusPlus,
+      SupportedLanguages.C,
+      SupportedLanguages.Python,
+      SupportedLanguages.Rust,
+      SupportedLanguages.Dart,
+      SupportedLanguages.PHP,
+      SupportedLanguages.Swift,
+    ];
+    for (const lang of defaultLanguages) {
+      const extractor = createHeritageExtractor(lang);
+      expect(extractor.language).toBe(lang);
+      expect(extractor.extractFromCall, `${lang} should not have extractFromCall`).toBeUndefined();
+    }
   });
 });
 

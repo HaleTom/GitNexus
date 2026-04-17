@@ -31,7 +31,6 @@ import { dartVariableConfig } from '../variable-extractors/configs/dart.js';
 import { createCallExtractor } from '../call-extractors/generic.js';
 import { dartCallConfig } from '../call-extractors/configs/dart.js';
 import { createHeritageExtractor } from '../heritage-extractors/generic.js';
-import { dartHeritageConfig } from '../heritage-extractors/configs/dart.js';
 
 /**
  * Resolve the enclosing function from a `function_body` node by looking at its
@@ -104,7 +103,7 @@ export const dartProvider = defineLanguage({
   methodExtractor: createMethodExtractor(dartMethodConfig),
   variableExtractor: createVariableExtractor(dartVariableConfig),
   classExtractor: createClassExtractor(dartClassConfig),
-  heritageExtractor: createHeritageExtractor(dartHeritageConfig),
+  heritageExtractor: createHeritageExtractor(SupportedLanguages.Dart),
   enclosingFunctionFinder: dartEnclosingFunctionFinder,
   builtInNames: BUILT_INS,
 });

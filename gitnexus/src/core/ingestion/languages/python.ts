@@ -29,7 +29,6 @@ import { pythonVariableConfig } from '../variable-extractors/configs/python.js';
 import { createCallExtractor } from '../call-extractors/generic.js';
 import { pythonCallConfig } from '../call-extractors/configs/python.js';
 import { createHeritageExtractor } from '../heritage-extractors/generic.js';
-import { pythonHeritageConfig } from '../heritage-extractors/configs/python.js';
 
 const BUILT_INS: ReadonlySet<string> = new Set([
   'print',
@@ -76,6 +75,6 @@ export const pythonProvider = defineLanguage({
   methodExtractor: createMethodExtractor(pythonMethodConfig),
   variableExtractor: createVariableExtractor(pythonVariableConfig),
   classExtractor: createClassExtractor(pythonClassConfig),
-  heritageExtractor: createHeritageExtractor(pythonHeritageConfig),
+  heritageExtractor: createHeritageExtractor(SupportedLanguages.Python),
   builtInNames: BUILT_INS,
 });

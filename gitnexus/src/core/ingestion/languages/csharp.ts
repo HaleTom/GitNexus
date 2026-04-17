@@ -25,7 +25,6 @@ import { csharpMethodConfig } from '../method-extractors/configs/csharp.js';
 import { createVariableExtractor } from '../variable-extractors/generic.js';
 import { csharpVariableConfig } from '../variable-extractors/configs/csharp.js';
 import { createHeritageExtractor } from '../heritage-extractors/generic.js';
-import { csharpHeritageConfig } from '../heritage-extractors/configs/csharp.js';
 
 const BUILT_INS: ReadonlySet<string> = new Set([
   'Console',
@@ -137,6 +136,6 @@ export const csharpProvider = defineLanguage({
   methodExtractor: createMethodExtractor(csharpMethodConfig),
   variableExtractor: createVariableExtractor(csharpVariableConfig),
   classExtractor: createClassExtractor(csharpClassConfig),
-  heritageExtractor: createHeritageExtractor(csharpHeritageConfig),
+  heritageExtractor: createHeritageExtractor(SupportedLanguages.CSharp),
   builtInNames: BUILT_INS,
 });

@@ -31,7 +31,6 @@ import { rustVariableConfig } from '../variable-extractors/configs/rust.js';
 import { createCallExtractor } from '../call-extractors/generic.js';
 import { rustCallConfig } from '../call-extractors/configs/rust.js';
 import { createHeritageExtractor } from '../heritage-extractors/generic.js';
-import { rustHeritageConfig } from '../heritage-extractors/configs/rust.js';
 
 /** Rust impl_item: find the function_item child and extract its name as a Method. */
 const rustExtractFunctionName = (
@@ -136,6 +135,6 @@ export const rustProvider = defineLanguage({
   }),
   variableExtractor: createVariableExtractor(rustVariableConfig),
   classExtractor: createClassExtractor(rustClassConfig),
-  heritageExtractor: createHeritageExtractor(rustHeritageConfig),
+  heritageExtractor: createHeritageExtractor(SupportedLanguages.Rust),
   builtInNames: BUILT_INS,
 });

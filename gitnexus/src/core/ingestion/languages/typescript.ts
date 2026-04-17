@@ -44,10 +44,6 @@ import {
   javascriptCallConfig,
 } from '../call-extractors/configs/typescript-javascript.js';
 import { createHeritageExtractor } from '../heritage-extractors/generic.js';
-import {
-  typescriptHeritageConfig,
-  javascriptHeritageConfig,
-} from '../heritage-extractors/configs/typescript-javascript.js';
 
 /**
  * TypeScript/JavaScript: arrow_function and function_expression get their name
@@ -187,7 +183,7 @@ export const typescriptProvider = defineLanguage({
   }),
   variableExtractor: createVariableExtractor(typescriptVariableConfig),
   classExtractor: createClassExtractor(typescriptClassConfig),
-  heritageExtractor: createHeritageExtractor(typescriptHeritageConfig),
+  heritageExtractor: createHeritageExtractor(SupportedLanguages.TypeScript),
   builtInNames: BUILT_INS,
 });
 
@@ -207,6 +203,6 @@ export const javascriptProvider = defineLanguage({
   }),
   variableExtractor: createVariableExtractor(javascriptVariableConfig),
   classExtractor: createClassExtractor(javascriptClassConfig),
-  heritageExtractor: createHeritageExtractor(javascriptHeritageConfig),
+  heritageExtractor: createHeritageExtractor(SupportedLanguages.JavaScript),
   builtInNames: BUILT_INS,
 });

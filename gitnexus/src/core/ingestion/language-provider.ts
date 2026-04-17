@@ -182,8 +182,9 @@ interface LanguageProviderConfig {
   readonly classExtractor?: ClassExtractor;
   /** Heritage extractor for extracting extends/implements/trait-impl relationships
    *  from tree-sitter @heritage.* captures and call-based heritage (e.g., Ruby
-   *  include/extend/prepend). Produced by createHeritageExtractor() with a
-   *  per-language HeritageExtractionConfig.
+   *  include/extend/prepend). Produced by createHeritageExtractor() — pass a
+   *  SupportedLanguages value for default behaviour or a full
+   *  HeritageExtractionConfig for languages with custom hooks (Go, Ruby).
    *  All tree-sitter providers MUST supply this. */
   readonly heritageExtractor?: HeritageExtractor;
   /** Extract a semantic description for a definition node (e.g., PHP Eloquent
