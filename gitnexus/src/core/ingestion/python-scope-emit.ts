@@ -480,7 +480,14 @@ function emitReceiverBoundCalls(
       // ── Case 2: class-name receiver (`Dog.classify()`) ──────────
       const classDef = findClassBindingInScope(site.inScope, receiverName, scopes);
       if (classDef !== undefined) {
-        const memberDef = findOwnedMember(classDef.nodeId, memberName, parsedFiles);
+        // Walk the MRO so inherited static/class methods resolve — e.g.
+        // `Dog.classify()` where `classify` lives on `Animal`.
+        const chain = [classDef.nodeId, ...scopes.methodDispatch.mroFor(classDef.nodeId)];
+        let memberDef: SymbolDefinition | undefined;
+        for (const ownerId of chain) {
+          memberDef = findOwnedMember(ownerId, memberName, parsedFiles);
+          if (memberDef !== undefined) break;
+        }
         if (memberDef !== undefined) {
           const emitted2 = tryEmitEdge(
             graph,
@@ -522,7 +529,39 @@ function emitReceiverBoundCalls(
                 seen,
               );
               if (emitted3) emitted++;
+              continue;
             }
+          }
+        }
+      }
+
+      // ── Case 4: simple typeBinding (`u: U` where U is aliased import)
+      // Happens when `u = U()` binds to an aliased import
+      // (`from models import User as U`). `findClassBindingInScope`
+      // already walks both `scope.bindings` (pre-finalize local defs)
+      // and `indexes.bindings` (post-finalize imports) for class-kind
+      // hits, so we reuse it against the typeBinding's rawName.
+      if (typeRef !== undefined && !typeRef.rawName.includes('.')) {
+        const ownerDef = findClassBindingInScope(site.inScope, typeRef.rawName, scopes);
+        if (ownerDef !== undefined) {
+          // Walk the MRO chain so inherited methods still resolve.
+          const chain = [ownerDef.nodeId, ...scopes.methodDispatch.mroFor(ownerDef.nodeId)];
+          let memberDef: SymbolDefinition | undefined;
+          for (const ownerId of chain) {
+            memberDef = findOwnedMember(ownerId, memberName, parsedFiles);
+            if (memberDef !== undefined) break;
+          }
+          if (memberDef !== undefined) {
+            const emitted4 = tryEmitEdge(
+              graph,
+              scopes,
+              nodeLookup,
+              site,
+              memberDef,
+              'python-scope: typeref-receiver',
+              seen,
+            );
+            if (emitted4) emitted++;
           }
         }
       }
@@ -609,8 +648,18 @@ function findExportedDef(
 }
 
 /**
- * Look up a class-kind binding by name in the given scope's chain. Used
- * to recognize `Dog.classify()` style class-as-receiver calls.
+ * Look up a class-kind binding by name in the given scope's chain.
+ *
+ * Walks the scope chain upward and consults TWO sources at each step:
+ *   1. `scope.bindings` — populated during scope-extraction Pass 2 with
+ *      local declarations (`origin: 'local'`). Holds the class's own
+ *      defining file visible to code in that file.
+ *   2. `indexes.bindings` — populated by the cross-file finalize pass
+ *      with import/namespace/wildcard/reexport origins. Needed to see
+ *      classes brought in via `from models import Dog` at the call
+ *      site's file.
+ *
+ * Without (2) we'd miss every cross-file class-receiver call.
  */
 function findClassBindingInScope(
   startScope: ScopeId,
@@ -624,12 +673,22 @@ function findClassBindingInScope(
     visited.add(currentId);
     const scope = scopes.scopeTree.getScope(currentId);
     if (scope === undefined) return undefined;
-    const bindings = scope.bindings.get(receiverName);
-    if (bindings !== undefined) {
-      for (const b of bindings) {
+
+    const localBindings = scope.bindings.get(receiverName);
+    if (localBindings !== undefined) {
+      for (const b of localBindings) {
         if (b.def.type === 'Class' || b.def.type === 'Interface') return b.def;
       }
     }
+
+    const finalizedScopeBindings = scopes.bindings.get(currentId);
+    const importedBindings = finalizedScopeBindings?.get(receiverName);
+    if (importedBindings !== undefined) {
+      for (const b of importedBindings) {
+        if (b.def.type === 'Class' || b.def.type === 'Interface') return b.def;
+      }
+    }
+
     currentId = scope.parent;
   }
   return undefined;
