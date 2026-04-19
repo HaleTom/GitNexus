@@ -30,7 +30,12 @@ import {
   registerRepo,
   cleanupOldKuzuFiles,
 } from '../storage/repo-manager.js';
-import { getCurrentCommit, getRemoteUrl, hasGitDir } from '../storage/git.js';
+import {
+  getCurrentCommit,
+  getRemoteUrl,
+  hasGitDir,
+  getInferredRepoName,
+} from '../storage/git.js';
 import type { CachedEmbedding } from './embeddings/types.js';
 import { generateAIContextFiles } from '../cli/ai-context.js';
 import { EMBEDDING_TABLE_NAME } from './lbug/schema.js';
@@ -152,7 +157,7 @@ export async function runFullAnalysis(
     // Non-git folders have currentCommit = '' — always rebuild since we can't detect changes
     if (currentCommit !== '') {
       return {
-        repoName: path.basename(repoPath),
+        repoName: options.registryName ?? getInferredRepoName(repoPath) ?? path.basename(repoPath),
         repoPath,
         stats: existingMeta.stats ?? {},
         alreadyUpToDate: true,
@@ -346,7 +351,11 @@ export async function runFullAnalysis(
     // pipeline `force` above. The CLI maps it from
     // `--allow-duplicate-name` only; `--force` and `--skills` both
     // trigger pipeline re-run but never bypass the registry guard.
-    await registerRepo(repoPath, meta, {
+    // The returned name is the one actually written to the registry
+    // (after applying the precedence chain in registerRepo) — reuse it
+    // so AGENTS.md / skill files reference the same name MCP clients
+    // will look up (#979).
+    const projectName = await registerRepo(repoPath, meta, {
       name: options.registryName,
       allowDuplicateName: options.allowDuplicateName,
     });
@@ -355,8 +364,6 @@ export async function runFullAnalysis(
     if (hasGitDir(repoPath)) {
       await addToGitignore(repoPath);
     }
-
-    const projectName = path.basename(repoPath);
 
     // ── Generate AI context files (best-effort) ───────────────────────
     let aggregatedClusterCount = 0;
