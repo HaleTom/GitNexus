@@ -64,9 +64,9 @@ import { SupportedLanguages } from 'gitnexus-shared';
  * not an env lookup) so CI can discover it via `tsx` without a build step
  * and reviewers see the change inline with the code that consumes it.
  */
-export const MIGRATED_LANGUAGES: ReadonlySet<SupportedLanguages> = new Set([
+export const MIGRATED_LANGUAGES: ReadonlySet<SupportedLanguages> = new Set<SupportedLanguages>([
   // Add languages here when their migration completes. Example:
-  SupportedLanguages.Python,
+  //   SupportedLanguages.Python,
 ]);
 
 /**
