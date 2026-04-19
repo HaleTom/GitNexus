@@ -647,6 +647,59 @@ function pass4CollectTypeBindings(
       host.typeBindings.set(parsed.boundName, typeRef);
     }
   }
+
+  // ── Transitive closure over identifier-chain type bindings ─────────
+  // Captures like `(assignment left: (ident) right: (ident))` emit a
+  // TypeRef whose `rawName` is the RHS identifier. When the RHS name is
+  // itself a bound variable with a known type in the same scope (or a
+  // parent scope), follow the chain so `alias` ultimately points at the
+  // class type — not at another local variable name. Without this,
+  // `resolveTypeRef` hits the chained name, sees it's a local Variable
+  // (non-type kind), and strict-returns null.
+  for (const draft of drafts) {
+    for (const [name, ref] of draft.typeBindings) {
+      const resolved = followChainedRef(ref, draftById);
+      if (resolved !== ref) draft.typeBindings.set(name, resolved);
+    }
+  }
+}
+
+/** Max chain depth: practical programs rarely exceed 4-5 re-bindings;
+ *  the cap just prevents runaway loops when providers emit cycles. */
+const CHAIN_MAX_DEPTH = 16;
+
+/**
+ * Follow an identifier-chain TypeRef through successive typeBindings
+ * lookups in the declaring scope and its ancestors. Returns the terminal
+ * TypeRef (or the original if the chain dead-ends or cycles).
+ */
+function followChainedRef(start: TypeRef, draftById: ReadonlyMap<ScopeId, ScopeDraft>): TypeRef {
+  let current = start;
+  const visited = new Set<string>();
+  for (let depth = 0; depth < CHAIN_MAX_DEPTH; depth++) {
+    // A rawName containing a dot (`models.User`) goes through
+    // `QualifiedNameIndex` at resolution time — don't follow it here.
+    if (current.rawName.includes('.')) return current;
+
+    // Look up the current rawName in the declaring scope and walk up
+    // the chain until we hit a scope that has a binding for it.
+    let scopeId: ScopeId | null = current.declaredAtScope;
+    let next: TypeRef | undefined;
+    while (scopeId !== null) {
+      const scope = draftById.get(scopeId);
+      if (scope === undefined) break;
+      next = scope.typeBindings.get(current.rawName);
+      if (next !== undefined) break;
+      scopeId = scope.parent;
+    }
+
+    if (next === undefined) return current; // dead end — nothing to chain to
+    if (next === current) return current; // self-ref
+    if (visited.has(next.rawName)) return current; // cycle guard
+    visited.add(next.rawName);
+    current = next;
+  }
+  return current;
 }
 
 /**

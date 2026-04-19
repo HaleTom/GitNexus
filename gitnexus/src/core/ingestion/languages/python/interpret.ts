@@ -103,8 +103,10 @@ export function interpretPythonTypeBinding(captures: CaptureMatch): ParsedTypeBi
   // `def f(x: "User")`.  Then unwrap nullable unions — `User | None`,
   // `None | User`, `Optional[User]` — to the concrete class name so
   // receiver-typed resolution treats nullable receivers identically to
-  // non-nullable ones.
-  const rawType = stripNullable(stripForwardRefQuotes(typeCap.text.trim()));
+  // non-nullable ones.  Finally strip single-arg generic wrappers so
+  // `list[User]` / `Iterable[User]` behave like `User` for iterable
+  // for-loop chain propagation.
+  const rawType = stripGeneric(stripNullable(stripForwardRefQuotes(typeCap.text.trim())));
 
   // Order matters: more specific anchor captures take precedence. `self`
   // and `cls` are synthesized with their own marker captures; the SCM
@@ -119,6 +121,7 @@ export function interpretPythonTypeBinding(captures: CaptureMatch): ParsedTypeBi
   else if (captures['@type-binding.cls'] !== undefined) source = 'self';
   else if (captures['@type-binding.constructor'] !== undefined) source = 'constructor-inferred';
   else if (captures['@type-binding.annotation'] !== undefined) source = 'annotation';
+  else if (captures['@type-binding.alias'] !== undefined) source = 'assignment-inferred';
 
   return { boundName: nameCap.text, rawTypeName: rawType, source };
 }
@@ -131,6 +134,24 @@ function stripForwardRefQuotes(text: string): string {
     return text.slice(1, -1);
   }
   return text;
+}
+
+/**
+ * Unwrap a single-arg generic collection wrapper — `list[User]`,
+ * `set[User]`, `Iterable[User]`, `Sequence[User]`, `Iterator[User]`,
+ * `Generator[User, ...]` — to its element type.
+ *
+ * Point: for-loop and cross-file chain propagation need the element
+ * type, not the container. Multi-arg generics (`dict[str, User]`,
+ * `Callable[[int], User]`) are left alone — the element semantics
+ * aren't unambiguous and the scope-chain fallback handles them at
+ * resolution time.
+ */
+function stripGeneric(text: string): string {
+  const match = text.match(
+    /^(?:[A-Za-z_][A-Za-z0-9_]*\.)?(?:list|List|set|Set|tuple|Tuple|Iterable|Iterator|Sequence|Generator|AsyncIterable|AsyncIterator)\[([^,\]]+)\]$/,
+  );
+  return match !== null ? match[1].trim() : text;
 }
 
 /**

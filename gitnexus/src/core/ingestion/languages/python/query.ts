@@ -90,6 +90,24 @@ export const PYTHON_SCOPE_QUERY = `
       (dotted_name) @type-binding.type))
   (identifier) @type-binding.name) @type-binding.constructor
 
+;; Assignment chain: \`alias = user\` — the new name inherits the
+;; RHS-identifier's type. The pattern emits a TypeRef whose rawName is
+;; the RHS identifier's text; the scope-extractor's post-pass follows
+;; the chain so \`alias\` ends up pointing at whatever type \`user\` has.
+(assignment
+  left: (identifier) @type-binding.name
+  right: (identifier) @type-binding.type) @type-binding.alias
+
+;; For-loop iterable of an already-typed variable:
+;;   def f(users: list[User]):
+;;       for u in users:     # u: users (chained via post-pass)
+;;           u.save()
+;; The chain post-pass resolves \`users\` → its own type \`User\` via
+;; the generic-arg stripping in \`interpret.ts\`.
+(for_statement
+  left: (identifier) @type-binding.name
+  right: (identifier) @type-binding.type) @type-binding.alias
+
 ;; Type bindings (variable annotations: \`u: User\` / \`u: User = x\`)
 (assignment
   left: (identifier) @type-binding.name
