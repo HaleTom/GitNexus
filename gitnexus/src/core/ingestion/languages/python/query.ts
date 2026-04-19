@@ -48,6 +48,17 @@ export const PYTHON_SCOPE_QUERY = `
   name: (identifier) @type-binding.name
   type: (type) @type-binding.type) @type-binding.parameter
 
+;; Type bindings (variable annotations: \`u: User\` / \`u: User = x\`)
+(assignment
+  left: (identifier) @type-binding.name
+  type: (type) @type-binding.type) @type-binding.annotation
+
+;; Type bindings (constructor-inferred: \`u = User(...)\`)
+(assignment
+  left: (identifier) @type-binding.name
+  right: (call
+    function: (identifier) @type-binding.type)) @type-binding.constructor
+
 ;; References — calls
 (call
   function: (identifier) @reference.name) @reference.call.free
@@ -71,10 +82,7 @@ export function getPythonParser(): Parser {
 
 export function getPythonScopeQuery(): Parser.Query {
   if (_query === null) {
-    _query = new Parser.Query(
-      Python as Parameters<Parser['setLanguage']>[0],
-      PYTHON_SCOPE_QUERY,
-    );
+    _query = new Parser.Query(Python as Parameters<Parser['setLanguage']>[0], PYTHON_SCOPE_QUERY);
   }
   return _query;
 }

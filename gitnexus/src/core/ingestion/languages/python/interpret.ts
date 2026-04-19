@@ -11,12 +11,7 @@
  * already attached) so these functions are straight-line tag readers.
  */
 
-import type {
-  CaptureMatch,
-  ParsedImport,
-  ParsedTypeBinding,
-  TypeRef,
-} from 'gitnexus-shared';
+import type { CaptureMatch, ParsedImport, ParsedTypeBinding, TypeRef } from 'gitnexus-shared';
 
 // ─── interpretImport ──────────────────────────────────────────────────────
 
@@ -108,11 +103,19 @@ export function interpretPythonTypeBinding(captures: CaptureMatch): ParsedTypeBi
   // `def f(x: "User")`.
   const rawType = stripForwardRefQuotes(typeCap.text.trim());
 
+  // Order matters: more specific anchor captures take precedence. `self`
+  // and `cls` are synthesized with their own marker captures; the SCM
+  // anchor topic captures (`@type-binding.parameter`,
+  // `@type-binding.annotation`, `@type-binding.constructor`) distinguish
+  // the variable-annotation and constructor-inferred forms from the
+  // classic parameter annotation.
   let source: TypeRef['source'] = 'parameter-annotation';
   if (captures['@type-binding.self'] !== undefined) source = 'self';
   // `cls` is a self-like receiver; share the source label so downstream
   // `Registry.lookup` Step 2 treats them identically.
   else if (captures['@type-binding.cls'] !== undefined) source = 'self';
+  else if (captures['@type-binding.constructor'] !== undefined) source = 'constructor-inferred';
+  else if (captures['@type-binding.annotation'] !== undefined) source = 'annotation';
 
   return { boundName: nameCap.text, rawTypeName: rawType, source };
 }
