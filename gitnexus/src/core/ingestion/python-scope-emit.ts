@@ -172,17 +172,19 @@ export function runPythonScopeResolution(
   // records' source + target via `nodeLookup` (built earlier alongside
   // the MRO map) before calling `graph.addRelationship`. This keeps
   // `emit-references.ts` untouched (it stays pure scope-resolution).
-  const { emitted, skipped } = emitReferencesViaLookup(
-    graph,
-    indexes,
-    referenceIndex,
-    nodeLookup,
-  );
+  const { emitted, skipped } = emitReferencesViaLookup(graph, indexes, referenceIndex, nodeLookup);
 
   // IMPORTS edges are emitted by the legacy `processImports` path
   // (which heritage resolution depends on for `ctx.resolve` to find
   // imported symbols). We intentionally do NOT emit IMPORTS here to
   // avoid duplicates and to keep heritage's resolution chain intact.
+  // TODO (RFC #909 Ring 3 follow-up): migrate IMPORTS edge emission to
+  // this path once the scope-extractor's ImportEdge coverage matches
+  // the legacy `pythonImportConfig.importResolver`. The existing
+  // `emitImportEdges` helper below is ready; wiring it requires
+  // closing a coverage gap identified against 10 fixtures (see
+  // `python-django-import`, `python-named-imports`,
+  // `python-alias-imports`, etc.). Tracked as separate ticket.
   const importsEmitted = 0;
 
   return {
