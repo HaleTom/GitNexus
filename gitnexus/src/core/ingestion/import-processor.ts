@@ -5,8 +5,7 @@ import { isLanguageAvailable, loadParser, loadLanguage } from '../tree-sitter/pa
 import { getProvider, getProviderForFile, providersWithImplicitWiring } from './languages/index.js';
 import type { LanguageProvider } from './language-provider.js';
 import { generateId } from '../../lib/utils.js';
-import { getLanguageFromFilename, SupportedLanguages } from 'gitnexus-shared';
-import { isRegistryPrimary } from './registry-primary-flag.js';
+import { getLanguageFromFilename } from 'gitnexus-shared';
 import { isVerboseIngestionEnabled } from './utils/verbose.js';
 import { yieldToEventLoop } from './utils/event-loop.js';
 import type { ExtractedImport } from './workers/parse-worker.js';
@@ -43,8 +42,6 @@ function wireImplicitImports(
 
   const grouped = new Map<LanguageProvider, string[]>();
   for (const file of files) {
-    const lang = getLanguageFromFilename(file);
-    if (lang && isRegistryPrimary(lang)) continue;
     const provider = getProviderForFile(file);
     if (!provider?.implicitImportWirer) continue;
     let list = grouped.get(provider);
@@ -285,11 +282,6 @@ export const processImports = async (
     // 1. Check language support first
     const language = getLanguageFromFilename(file.path);
     if (!language) continue;
-    // Registry-primary gate: when REGISTRY_PRIMARY_<LANG>=1, the
-    // scope-based pipeline phase (`pythonScopePhase`, etc.) owns
-    // IMPORTS/CALLS emission for this language. Skip the legacy path
-    // here so we don't double-emit edges.
-    if (isRegistryPrimary(language)) continue;
     if (!isLanguageAvailable(language)) {
       if (skippedByLang) {
         skippedByLang.set(language, (skippedByLang.get(language) ?? 0) + 1);
@@ -475,10 +467,6 @@ export const processImportsFromExtracted = async (
     }
 
     for (const imp of fileImports) {
-      // Registry-primary gate: skip when the scope-based phase owns
-      // emission for this language. `imp.language` is set by the parse
-      // worker; trust it here.
-      if (isRegistryPrimary(imp.language)) continue;
       totalImportsFound++;
 
       const provider = getProvider(imp.language);

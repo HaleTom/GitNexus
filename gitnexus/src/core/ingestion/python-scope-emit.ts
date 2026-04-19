@@ -179,12 +179,11 @@ export function runPythonScopeResolution(
     nodeLookup,
   );
 
-  // IMPORTS edges: mirror the legacy file-to-file shape so existing
-  // queries that aggregate by `File → File` continue to work. Done here
-  // (not in `emit-references.emitScopeGraph`) because that path emits
-  // scope-to-scope edges, which are a different schema. Keeping the
-  // legacy shape avoids churn in downstream consumers and tests.
-  const importsEmitted = emitImportEdges(graph, indexes.imports, indexes.scopeTree);
+  // IMPORTS edges are emitted by the legacy `processImports` path
+  // (which heritage resolution depends on for `ctx.resolve` to find
+  // imported symbols). We intentionally do NOT emit IMPORTS here to
+  // avoid duplicates and to keep heritage's resolution chain intact.
+  const importsEmitted = 0;
 
   return {
     filesProcessed: parsedFiles.length,
