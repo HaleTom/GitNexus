@@ -12,6 +12,7 @@
 
 import type { ParsedImport, WorkspaceIndex } from 'gitnexus-shared';
 import { resolvePythonImportInternal } from '../../import-resolvers/python.js';
+import { suffixResolve } from '../../import-resolvers/utils.js';
 
 export interface PythonResolveContext {
   readonly fromFile: string;
@@ -33,5 +34,17 @@ export function resolvePythonImportTarget(
   if (parsedImport.kind === 'dynamic-unresolved') return null;
   if (parsedImport.targetRaw === null || parsedImport.targetRaw === '') return null;
 
-  return resolvePythonImportInternal(ctx.fromFile, parsedImport.targetRaw, ctx.allFilePaths);
+  // PEP-328 relative + single-segment proximity bare imports.
+  const internal = resolvePythonImportInternal(
+    ctx.fromFile,
+    parsedImport.targetRaw,
+    ctx.allFilePaths,
+  );
+  if (internal !== null) return internal;
+
+  // Multi-segment absolute (`from models.user import …`, `import a.b.c`):
+  // fall through to suffix matching, mirroring the `standard.ts` resolver
+  // path that the legacy ingestion uses for Python.
+  const allFiles = [...ctx.allFilePaths];
+  return suffixResolve(parsedImport.targetRaw.split('.'), allFiles, allFiles);
 }
