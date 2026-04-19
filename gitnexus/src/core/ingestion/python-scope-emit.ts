@@ -492,12 +492,68 @@ function emitReceiverBoundCalls(
             seen,
           );
           if (emitted2) emitted++;
+          continue;
+        }
+      }
+
+      // ── Case 3: receiver has a dotted typeBinding (`u: models.User`) ──
+      // Happens when `u = models.User(...)` fires the qualified-call
+      // constructor-inferred capture. The shared resolveTypeRef can't
+      // handle it because User's qualifiedName in models.py is just
+      // "User" (not "models.User"), so QualifiedNameIndex fallback
+      // misses. Resolve manually via the namespace map.
+      const typeRef = findReceiverTypeBinding(site.inScope, receiverName, scopes);
+      if (typeRef !== undefined && typeRef.rawName.includes('.')) {
+        const [nsName, ...classNameParts] = typeRef.rawName.split('.');
+        const className = classNameParts.join('.');
+        const targetFile = namespaceTargets.get(nsName);
+        if (targetFile !== undefined && className.length > 0) {
+          const classDef3 = findExportedDef(targetFile, className, parsedFiles);
+          if (classDef3 !== undefined) {
+            const memberDef = findOwnedMember(classDef3.nodeId, memberName, parsedFiles);
+            if (memberDef !== undefined) {
+              const emitted3 = tryEmitEdge(
+                graph,
+                scopes,
+                nodeLookup,
+                site,
+                memberDef,
+                'python-scope: dotted-typebinding',
+                seen,
+              );
+              if (emitted3) emitted++;
+            }
+          }
         }
       }
     }
   }
 
   return emitted;
+}
+
+/**
+ * Walk the scope chain from `startScope` looking for a typeBinding
+ * named `receiverName`. Returns the TypeRef or undefined if no binding
+ * exists in the chain.
+ */
+function findReceiverTypeBinding(
+  startScope: ScopeId,
+  receiverName: string,
+  scopes: ScopeResolutionIndexes,
+): { readonly rawName: string } | undefined {
+  let currentId: ScopeId | null = startScope;
+  const visited = new Set<ScopeId>();
+  while (currentId !== null) {
+    if (visited.has(currentId)) return undefined;
+    visited.add(currentId);
+    const scope = scopes.scopeTree.getScope(currentId);
+    if (scope === undefined) return undefined;
+    const typeRef = scope.typeBindings.get(receiverName);
+    if (typeRef !== undefined) return typeRef;
+    currentId = scope.parent;
+  }
+  return undefined;
 }
 
 /**
