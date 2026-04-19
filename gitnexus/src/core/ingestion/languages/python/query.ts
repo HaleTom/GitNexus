@@ -48,16 +48,20 @@ export const PYTHON_SCOPE_QUERY = `
   name: (identifier) @type-binding.name
   type: (type) @type-binding.type) @type-binding.parameter
 
-;; Type bindings (variable annotations: \`u: User\` / \`u: User = x\`)
-(assignment
-  left: (identifier) @type-binding.name
-  type: (type) @type-binding.type) @type-binding.annotation
-
 ;; Type bindings (constructor-inferred: \`u = User(...)\`)
+;; Listed BEFORE the annotation pattern so \`u: User = find()\` — which
+;; matches BOTH patterns — has the annotation (later match) overwrite
+;; the constructor-inferred guess (earlier match) in the typeBindings
+;; map. Explicit user intent beats inference.
 (assignment
   left: (identifier) @type-binding.name
   right: (call
     function: (identifier) @type-binding.type)) @type-binding.constructor
+
+;; Type bindings (variable annotations: \`u: User\` / \`u: User = x\`)
+(assignment
+  left: (identifier) @type-binding.name
+  type: (type) @type-binding.type) @type-binding.annotation
 
 ;; References — calls
 (call

@@ -634,7 +634,43 @@ function pass4CollectTypeBindings(
       declaredAtScope: host.id,
       source: parsed.source,
     };
-    host.typeBindings.set(parsed.boundName, typeRef);
+    // Prefer stronger sources when multiple matches fire for the same
+    // bound name in the same scope. Example: `u: User = find()` matches
+    // both the annotation and constructor-inferred patterns; the explicit
+    // annotation (stronger source) must win over the call-site guess
+    // regardless of query-match arrival order.
+    const existing = host.typeBindings.get(parsed.boundName);
+    if (
+      existing === undefined ||
+      typeBindingStrength(typeRef.source) >= typeBindingStrength(existing.source)
+    ) {
+      host.typeBindings.set(parsed.boundName, typeRef);
+    }
+  }
+}
+
+/**
+ * Priority ordering when multiple `TypeRef`s compete for the same bound
+ * name in the same scope. Higher number wins; ties keep the later match
+ * (last-write-wins preserves historical order within a tier).
+ *
+ * Rationale: explicit annotations always beat inferred ones because they
+ * reflect user intent. `self`/`cls` are treated as strongly as annotations
+ * because they are language-required receiver types.
+ */
+function typeBindingStrength(source: TypeRef['source']): number {
+  switch (source) {
+    case 'annotation':
+    case 'parameter-annotation':
+    case 'return-annotation':
+    case 'self':
+      return 2;
+    case 'assignment-inferred':
+    case 'constructor-inferred':
+    case 'receiver-propagated':
+      return 1;
+    default:
+      return 0;
   }
 }
 

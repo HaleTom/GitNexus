@@ -100,8 +100,11 @@ export function interpretPythonTypeBinding(captures: CaptureMatch): ParsedTypeBi
   if (nameCap === undefined || typeCap === undefined) return null;
 
   // Strip surrounding quotes for PEP 484 forward references:
-  // `def f(x: "User")`.
-  const rawType = stripForwardRefQuotes(typeCap.text.trim());
+  // `def f(x: "User")`.  Then unwrap nullable unions — `User | None`,
+  // `None | User`, `Optional[User]` — to the concrete class name so
+  // receiver-typed resolution treats nullable receivers identically to
+  // non-nullable ones.
+  const rawType = stripNullable(stripForwardRefQuotes(typeCap.text.trim()));
 
   // Order matters: more specific anchor captures take precedence. `self`
   // and `cls` are synthesized with their own marker captures; the SCM
@@ -127,5 +130,30 @@ function stripForwardRefQuotes(text: string): string {
   ) {
     return text.slice(1, -1);
   }
+  return text;
+}
+
+/**
+ * Unwrap nullable type annotations so downstream resolution treats
+ * `User | None`, `None | User`, and `Optional[User]` identically to
+ * `User`. A missing/unknown variant returns the input unchanged.
+ *
+ * This is a syntactic strip, not a semantic parse — it handles the
+ * canonical PEP-604 and `typing.Optional` shapes that cover the
+ * overwhelming majority of real-world Python annotations and punts on
+ * exotic unions (e.g. `User | Error`, which is ambiguous and should not
+ * auto-bind to one arm).
+ */
+function stripNullable(text: string): string {
+  // `Optional[X]` / `typing.Optional[X]` / `t.Optional[X]`
+  const optMatch = text.match(/^(?:[A-Za-z_][A-Za-z0-9_]*\.)?Optional\[(.+)\]$/);
+  if (optMatch !== null) return optMatch[1].trim();
+
+  // Binary union forms. A three-arm or larger union (`User | None | Error`)
+  // is ambiguous for single-receiver inference, so we leave it alone.
+  const parts = text.split('|').map((p) => p.trim());
+  if (parts.length !== 2) return text;
+  if (parts[0] === 'None') return parts[1];
+  if (parts[1] === 'None') return parts[0];
   return text;
 }

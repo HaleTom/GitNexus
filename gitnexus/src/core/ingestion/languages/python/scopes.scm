@@ -91,6 +91,26 @@
   name: (identifier) @type-binding.name
   type: (type) @type-binding.type) @type-binding.parameter
 
+; ─── Type bindings: constructor-inferred assignments ───────────────────────
+;
+; `u = User("alice")` — `u`'s type is inferred from the RHS call's target.
+; Python has no `new` keyword, so the pattern matches any `assignment`
+; whose RHS is a `call` with a bare-identifier function (constructor-
+; shaped). The registry resolves the raw name through the scope chain at
+; lookup time, so imported classes, local classes, and aliased imports
+; all work without query-time knowledge.
+;
+; Emits `source: 'constructor-inferred'`.
+;
+; Listed BEFORE the annotation pattern so `u: User = find()` — which
+; matches both patterns — has the annotation (later-processed match)
+; overwrite the constructor-inferred guess. Explicit user intent wins.
+
+(assignment
+  left: (identifier) @type-binding.name
+  right: (call
+    function: (identifier) @type-binding.type)) @type-binding.constructor
+
 ; ─── Type bindings: variable annotations ───────────────────────────────────
 ;
 ; `u: User` or `u: User = some_value` — `u` is explicitly annotated. Both
@@ -104,22 +124,6 @@
 (assignment
   left: (identifier) @type-binding.name
   type: (type) @type-binding.type) @type-binding.annotation
-
-; ─── Type bindings: constructor-inferred assignments ───────────────────────
-;
-; `u = User("alice")` — `u`'s type is inferred from the RHS call's target.
-; Python has no `new` keyword, so the pattern matches any `assignment`
-; whose RHS is a `call` with a bare-identifier function (constructor-
-; shaped). The registry resolves the raw name through the scope chain at
-; lookup time, so imported classes, local classes, and aliased imports
-; all work without query-time knowledge.
-;
-; Emits `source: 'constructor-inferred'`.
-
-(assignment
-  left: (identifier) @type-binding.name
-  right: (call
-    function: (identifier) @type-binding.type)) @type-binding.constructor
 
 ; ─── References: calls ─────────────────────────────────────────────────────
 ;
