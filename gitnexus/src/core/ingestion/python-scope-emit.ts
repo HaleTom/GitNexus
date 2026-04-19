@@ -174,18 +174,13 @@ export function runPythonScopeResolution(
   // `emit-references.ts` untouched (it stays pure scope-resolution).
   const { emitted, skipped } = emitReferencesViaLookup(graph, indexes, referenceIndex, nodeLookup);
 
-  // IMPORTS edges are emitted by the legacy `processImports` path
-  // (which heritage resolution depends on for `ctx.resolve` to find
-  // imported symbols). We intentionally do NOT emit IMPORTS here to
-  // avoid duplicates and to keep heritage's resolution chain intact.
-  // TODO (RFC #909 Ring 3 follow-up): migrate IMPORTS edge emission to
-  // this path once the scope-extractor's ImportEdge coverage matches
-  // the legacy `pythonImportConfig.importResolver`. The existing
-  // `emitImportEdges` helper below is ready; wiring it requires
-  // closing a coverage gap identified against 10 fixtures (see
-  // `python-django-import`, `python-named-imports`,
-  // `python-alias-imports`, etc.). Tracked as separate ticket.
-  const importsEmitted = 0;
+  // IMPORTS edges: the scope-resolution path now owns Python file→file
+  // IMPORTS edge emission when `REGISTRY_PRIMARY_PYTHON=1`. The legacy
+  // `processImports` path still runs (heritage needs its `importMap`
+  // population for `ctx.resolve`), but import-processor's graph edge
+  // emission is gated per-language in `createImportEdgeHelpers` so
+  // Python no longer double-emits.
+  const importsEmitted = emitImportEdges(graph, indexes.imports, indexes.scopeTree);
 
   return {
     filesProcessed: parsedFiles.length,
