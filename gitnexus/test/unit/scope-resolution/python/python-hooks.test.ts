@@ -27,7 +27,7 @@ import {
   pythonShouldCreateScope,
   pythonBindingScopeFor,
   resolvePythonImportTarget,
-} from '../../../../src/core/ingestion/languages/python/scope-hooks.js';
+} from '../../../../src/core/ingestion/languages/python/index.js';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 

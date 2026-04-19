@@ -1,0 +1,128 @@
+/**
+ * Capture-match → semantic-shape interpreters.
+ *
+ * Two pure functions, both consumed by the central scope extractor:
+ *
+ *   - `interpretPythonImport`     → `ParsedImport`
+ *   - `interpretPythonTypeBinding` → `ParsedTypeBinding`
+ *
+ * The matches arrive pre-decomposed by `emitPythonScopeCaptures`
+ * (one imported name per match; synthesized `self`/`cls` markers
+ * already attached) so these functions are straight-line tag readers.
+ */
+
+import type {
+  CaptureMatch,
+  ParsedImport,
+  ParsedTypeBinding,
+  TypeRef,
+} from 'gitnexus-shared';
+
+// ─── interpretImport ──────────────────────────────────────────────────────
+
+export function interpretPythonImport(captures: CaptureMatch): ParsedImport | null {
+  // Markers attached by `splitImportStatement` (import-decomposer.ts):
+  //   `@import.kind`  : 'plain' | 'aliased' | 'from' | 'from-alias' | 'wildcard' | 'dynamic'
+  //   `@import.name`  : the imported symbol name (or module name for plain imports)
+  //   `@import.alias` : the local alias name (for `as` forms)
+  //   `@import.source`: the module path (always present except for `dynamic`)
+  const kindCap = captures['@import.kind'];
+  const nameCap = captures['@import.name'];
+  const aliasCap = captures['@import.alias'];
+  const sourceCap = captures['@import.source'];
+
+  const kind = kindCap?.text;
+  if (kind === undefined) return null;
+
+  switch (kind) {
+    case 'plain': {
+      // `import numpy`
+      if (sourceCap === undefined) return null;
+      return {
+        kind: 'namespace',
+        localName: sourceCap.text.split('.')[0]!, // `import a.b.c` exposes `a`
+        importedName: sourceCap.text,
+        targetRaw: sourceCap.text,
+      };
+    }
+    case 'aliased': {
+      // `import numpy as np`
+      if (sourceCap === undefined || aliasCap === undefined) return null;
+      return {
+        kind: 'namespace',
+        localName: aliasCap.text,
+        importedName: sourceCap.text,
+        targetRaw: sourceCap.text,
+      };
+    }
+    case 'from': {
+      // `from m import x`
+      if (sourceCap === undefined || nameCap === undefined) return null;
+      return {
+        kind: 'named',
+        localName: nameCap.text,
+        importedName: nameCap.text,
+        targetRaw: sourceCap.text,
+      };
+    }
+    case 'from-alias': {
+      // `from m import x as y`
+      if (sourceCap === undefined || nameCap === undefined || aliasCap === undefined) return null;
+      return {
+        kind: 'alias',
+        localName: aliasCap.text,
+        importedName: nameCap.text,
+        alias: aliasCap.text,
+        targetRaw: sourceCap.text,
+      };
+    }
+    case 'wildcard': {
+      // `from m import *`
+      if (sourceCap === undefined) return null;
+      return { kind: 'wildcard', targetRaw: sourceCap.text };
+    }
+    case 'dynamic': {
+      // `importlib.import_module(...)` — preserved for diagnostics.
+      return {
+        kind: 'dynamic-unresolved',
+        localName: '',
+        targetRaw: sourceCap?.text ?? null,
+      };
+    }
+    default:
+      return null;
+  }
+}
+
+// ─── interpretTypeBinding ─────────────────────────────────────────────────
+
+export function interpretPythonTypeBinding(captures: CaptureMatch): ParsedTypeBinding | null {
+  // Synthesized `self` / `cls` captures carry `@type-binding.name` and
+  // `@type-binding.type` directly — same shape as parameter annotations,
+  // source differs.
+  const nameCap = captures['@type-binding.name'];
+  const typeCap = captures['@type-binding.type'];
+  if (nameCap === undefined || typeCap === undefined) return null;
+
+  // Strip surrounding quotes for PEP 484 forward references:
+  // `def f(x: "User")`.
+  const rawType = stripForwardRefQuotes(typeCap.text.trim());
+
+  let source: TypeRef['source'] = 'parameter-annotation';
+  if (captures['@type-binding.self'] !== undefined) source = 'self';
+  // `cls` is a self-like receiver; share the source label so downstream
+  // `Registry.lookup` Step 2 treats them identically.
+  else if (captures['@type-binding.cls'] !== undefined) source = 'self';
+
+  return { boundName: nameCap.text, rawTypeName: rawType, source };
+}
+
+function stripForwardRefQuotes(text: string): string {
+  if (
+    (text.startsWith('"') && text.endsWith('"')) ||
+    (text.startsWith("'") && text.endsWith("'"))
+  ) {
+    return text.slice(1, -1);
+  }
+  return text;
+}

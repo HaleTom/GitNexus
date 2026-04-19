@@ -41,7 +41,7 @@ import {
   pythonShouldCreateScope,
   pythonShouldShadow,
   resolvePythonImportTarget,
-} from './python/scope-hooks.js';
+} from './python/index.js';
 
 const BUILT_INS: ReadonlySet<string> = new Set([
   'print',
@@ -92,7 +92,7 @@ export const pythonProvider = defineLanguage({
   builtInNames: BUILT_INS,
 
   // ── RFC #909 Ring 3: scope-based resolution hooks (RFC §5) ──────────
-  // Python is the first migration. See ./python/scope-hooks.ts for the
+  // Python is the first migration. See ./python/index.ts for the
   // full per-hook rationale and the canonical capture vocabulary in
   // ./python/scopes.scm.
   emitScopeCaptures: emitPythonScopeCaptures,
