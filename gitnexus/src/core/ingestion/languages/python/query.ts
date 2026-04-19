@@ -50,13 +50,45 @@ export const PYTHON_SCOPE_QUERY = `
 
 ;; Type bindings (constructor-inferred: \`u = User(...)\`)
 ;; Listed BEFORE the annotation pattern so \`u: User = find()\` — which
-;; matches BOTH patterns — has the annotation (later match) overwrite
-;; the constructor-inferred guess (earlier match) in the typeBindings
-;; map. Explicit user intent beats inference.
+;; matches BOTH patterns — has the annotation (stronger source) win over
+;; the constructor-inferred guess via the scope-extractor's source-
+;; strength tie-break in pass4CollectTypeBindings.
 (assignment
   left: (identifier) @type-binding.name
   right: (call
     function: (identifier) @type-binding.type)) @type-binding.constructor
+
+;; Qualified constructor (\`u = models.User(...)\`). Captures the
+;; attribute node as the type — its \`.text\` is the full dotted path
+;; (\`models.User\`), which \`resolveTypeRef\` resolves via
+;; \`QualifiedNameIndex\` Phase 2.
+(assignment
+  left: (identifier) @type-binding.name
+  right: (call
+    function: (attribute) @type-binding.type)) @type-binding.constructor
+
+;; Walrus operator: \`(u := User(...))\`. Python 3.8+ named expression.
+;; Shares the constructor-inferred shape so the binding lands in the
+;; enclosing function/module scope's typeBindings the same way a plain
+;; assignment would.
+(named_expression
+  name: (identifier) @type-binding.name
+  value: (call
+    function: (identifier) @type-binding.type)) @type-binding.constructor
+
+(named_expression
+  name: (identifier) @type-binding.name
+  value: (call
+    function: (attribute) @type-binding.type)) @type-binding.constructor
+
+;; Match-case as-pattern: \`case User() as u:\` → \`u: User\`. The
+;; class_pattern's dotted_name carries the type; the outer as_pattern's
+;; second child is the binding name.
+(as_pattern
+  (case_pattern
+    (class_pattern
+      (dotted_name) @type-binding.type))
+  (identifier) @type-binding.name) @type-binding.constructor
 
 ;; Type bindings (variable annotations: \`u: User\` / \`u: User = x\`)
 (assignment
