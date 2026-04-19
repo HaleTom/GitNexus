@@ -30,6 +30,7 @@ import {
   toolsPhase,
   ormPhase,
   crossFilePhase,
+  pythonScopePhase,
   mroPhase,
   communitiesPhase,
   processesPhase,
@@ -80,6 +81,7 @@ function buildPhaseList(options?: PipelineOptions): PipelinePhase[] {
     toolsPhase,
     ormPhase,
     crossFilePhase,
+    pythonScopePhase,
   ];
 
   if (!options?.skipGraphPhases) {
