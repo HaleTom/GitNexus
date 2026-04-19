@@ -33,6 +33,7 @@ import type {
   RegistryProviders,
   Scope,
   ScopeId,
+  SymbolDefinition,
   WorkspaceIndex,
 } from 'gitnexus-shared';
 import type { KnowledgeGraph } from '../graph/types.js';
@@ -174,6 +175,21 @@ export function runPythonScopeResolution(
   // `emit-references.ts` untouched (it stays pure scope-resolution).
   const { emitted, skipped } = emitReferencesViaLookup(graph, indexes, referenceIndex, nodeLookup);
 
+  // Python-specific post-pass: emit CALLS edges for dotted references
+  // whose receiver is a namespace import (`import models; models.User()`)
+  // or a Class name (`Dog.classify()`). The shared `MethodRegistry.lookup`
+  // only walks `scope.typeBindings` for explicit-receiver resolution — it
+  // does NOT consult `scope.bindings` for namespace/class-kind entries.
+  // Rather than extend the shared contract, we cover the gap here with a
+  // direct receiver → target-module / target-class walk.
+  const receiverExtras = emitReceiverBoundCalls(
+    graph,
+    indexes,
+    parsedFiles,
+    nodeLookup,
+    referenceIndex,
+  );
+
   // IMPORTS edges: the scope-resolution path now owns Python file→file
   // IMPORTS edge emission when `REGISTRY_PRIMARY_PYTHON=1`. The legacy
   // `processImports` path still runs (heritage needs its `importMap`
@@ -187,7 +203,7 @@ export function runPythonScopeResolution(
     filesSkipped,
     importsEmitted,
     resolve: resolveStats,
-    referenceEdgesEmitted: emitted,
+    referenceEdgesEmitted: emitted + receiverExtras,
     referenceSkipped: skipped,
   };
 }
@@ -388,6 +404,247 @@ function emitReferencesViaLookup(
 }
 
 /**
+ * Emit CALLS / ACCESSES edges for dotted references whose receiver is a
+ * namespace-import binding (`import models; models.User()`) or a class
+ * name in the call scope (`Dog.classify("dog")`).
+ *
+ * The shared `MethodRegistry.lookup` only walks `scope.typeBindings`
+ * when resolving an explicit receiver (`lookupReceiverType`). It never
+ * consults `scope.bindings` for namespace/class-kind entries, nor does
+ * it follow an `ImportEdge.targetModuleScope` for cross-module lookups.
+ * Rather than widen the shared contract, this Python-specific pass
+ * closes the gap with a direct receiver → target walk. Already-emitted
+ * edges (via the shared resolver) are deduped by the same graph-id
+ * `(src → tgt @line:col)` key the main path uses.
+ */
+function emitReceiverBoundCalls(
+  graph: KnowledgeGraph,
+  scopes: ScopeResolutionIndexes,
+  parsedFiles: readonly ParsedFile[],
+  nodeLookup: GraphNodeLookup,
+  referenceIndex: { readonly bySourceScope: ReadonlyMap<ScopeId, readonly Reference[]> },
+): number {
+  let emitted = 0;
+  // Share the same dedup shape as `emitReferencesViaLookup` so we never
+  // double-count a resolution that the shared path already produced.
+  const seen = new Set<string>();
+  for (const refs of referenceIndex.bySourceScope.values()) {
+    for (const r of refs) {
+      const kind = mapReferenceKindToEdgeType(r.kind);
+      if (kind === undefined) continue;
+      const callerGraphId = resolveCallerGraphId(r.fromScope, scopes, nodeLookup);
+      if (callerGraphId === undefined) continue;
+      const targetDef = scopes.defs.get(r.toDef);
+      if (targetDef === undefined) continue;
+      const tgtGraphId = resolveDefGraphId(targetDef.filePath, targetDef, nodeLookup);
+      if (tgtGraphId === undefined) continue;
+      seen.add(
+        `${kind}:${callerGraphId}->${tgtGraphId}:${r.atRange.startLine}:${r.atRange.startCol}`,
+      );
+    }
+  }
+
+  for (const parsed of parsedFiles) {
+    // Pre-compute per-file "namespace receiver → target file" map from
+    // the file's module-scope import edges. A map keyed by `localName`
+    // means `import models` and `import models as m` both yield the
+    // right target without walking edges N times per reference.
+    const namespaceTargets = collectNamespaceTargets(parsed, scopes);
+
+    for (const site of parsed.referenceSites) {
+      if (site.kind !== 'call' && site.kind !== 'read' && site.kind !== 'write') continue;
+      if (site.explicitReceiver === undefined) continue;
+
+      const receiverName = site.explicitReceiver.name;
+      const memberName = site.name;
+
+      // ── Case 1: namespace receiver (`import models; models.X()`) ─
+      const targetFile = namespaceTargets.get(receiverName);
+      if (targetFile !== undefined) {
+        const memberDef = findExportedDef(targetFile, memberName, parsedFiles);
+        if (memberDef !== undefined) {
+          const emitted1 = tryEmitEdge(
+            graph,
+            scopes,
+            nodeLookup,
+            site,
+            memberDef,
+            'python-scope: namespace-receiver',
+            seen,
+          );
+          if (emitted1) emitted++;
+          continue;
+        }
+      }
+
+      // ── Case 2: class-name receiver (`Dog.classify()`) ──────────
+      const classDef = findClassBindingInScope(site.inScope, receiverName, scopes);
+      if (classDef !== undefined) {
+        const memberDef = findOwnedMember(classDef.nodeId, memberName, parsedFiles);
+        if (memberDef !== undefined) {
+          const emitted2 = tryEmitEdge(
+            graph,
+            scopes,
+            nodeLookup,
+            site,
+            memberDef,
+            'python-scope: class-receiver',
+            seen,
+          );
+          if (emitted2) emitted++;
+        }
+      }
+    }
+  }
+
+  return emitted;
+}
+
+/**
+ * Build a `localName → targetFilePath` map over the file's module-scope
+ * import edges, limited to namespace-kind imports (which is what binds
+ * a name that can appear as a receiver — `from m import X` binds `X`
+ * directly, not `m.X`).
+ */
+function collectNamespaceTargets(
+  parsed: ParsedFile,
+  scopes: ScopeResolutionIndexes,
+): Map<string, string> {
+  const out = new Map<string, string>();
+  // `parsed.parsedImports` carries the raw decomposed imports keyed to
+  // their target file via `indexes.imports`; we match by source line to
+  // find the finalized edge with `targetFile`. A simpler traversal:
+  // walk `indexes.imports.get(module)` and cross-reference `parsedImports`
+  // to pick out namespace-kind entries.
+  const moduleEdges = scopes.imports.get(parsed.moduleScope);
+  if (moduleEdges === undefined) return out;
+
+  const namespaceLocals = new Set<string>();
+  for (const imp of parsed.parsedImports) {
+    if (imp.kind === 'namespace') namespaceLocals.add(imp.localName);
+  }
+
+  for (const edge of moduleEdges) {
+    if (edge.targetFile === null) continue;
+    if (!namespaceLocals.has(edge.localName)) continue;
+    out.set(edge.localName, edge.targetFile);
+  }
+  return out;
+}
+
+/**
+ * Find a file-level exported def (top-of-module class / function /
+ * variable) by `simpleName` in a given target file's `parsedFile.localDefs`.
+ */
+function findExportedDef(
+  targetFile: string,
+  memberName: string,
+  parsedFiles: readonly ParsedFile[],
+): SymbolDefinition | undefined {
+  for (const f of parsedFiles) {
+    if (f.filePath !== targetFile) continue;
+    for (const def of f.localDefs) {
+      if (simpleQualifiedName(def) !== memberName) continue;
+      return def;
+    }
+    return undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Look up a class-kind binding by name in the given scope's chain. Used
+ * to recognize `Dog.classify()` style class-as-receiver calls.
+ */
+function findClassBindingInScope(
+  startScope: ScopeId,
+  receiverName: string,
+  scopes: ScopeResolutionIndexes,
+): SymbolDefinition | undefined {
+  let currentId: ScopeId | null = startScope;
+  const visited = new Set<ScopeId>();
+  while (currentId !== null) {
+    if (visited.has(currentId)) return undefined;
+    visited.add(currentId);
+    const scope = scopes.scopeTree.getScope(currentId);
+    if (scope === undefined) return undefined;
+    const bindings = scope.bindings.get(receiverName);
+    if (bindings !== undefined) {
+      for (const b of bindings) {
+        if (b.def.type === 'Class' || b.def.type === 'Interface') return b.def;
+      }
+    }
+    currentId = scope.parent;
+  }
+  return undefined;
+}
+
+/**
+ * Find a member of a class by simple name — a def whose `ownerId`
+ * matches the class's nodeId and whose simple name matches `memberName`.
+ */
+function findOwnedMember(
+  ownerDefId: string,
+  memberName: string,
+  parsedFiles: readonly ParsedFile[],
+): SymbolDefinition | undefined {
+  for (const f of parsedFiles) {
+    for (const def of f.localDefs) {
+      if (def.ownerId !== ownerDefId) continue;
+      if (simpleQualifiedName(def) !== memberName) continue;
+      return def;
+    }
+  }
+  return undefined;
+}
+
+function simpleQualifiedName(def: SymbolDefinition): string | undefined {
+  const q = def.qualifiedName;
+  if (q === undefined || q.length === 0) return undefined;
+  const dot = q.lastIndexOf('.');
+  return dot === -1 ? q : q.slice(dot + 1);
+}
+
+/**
+ * Resolve caller + target to graph ids and emit the edge. Returns true
+ * if the edge was emitted (not deduped, not skipped).
+ */
+function tryEmitEdge(
+  graph: KnowledgeGraph,
+  scopes: ScopeResolutionIndexes,
+  nodeLookup: GraphNodeLookup,
+  site: {
+    readonly inScope: ScopeId;
+    readonly atRange: { startLine: number; startCol: number };
+    readonly kind: string;
+  },
+  targetDef: SymbolDefinition,
+  reason: string,
+  seen: Set<string>,
+): boolean {
+  const callerGraphId = resolveCallerGraphId(site.inScope, scopes, nodeLookup);
+  const targetGraphId = resolveDefGraphId(targetDef.filePath, targetDef, nodeLookup);
+  const edgeType = mapReferenceKindToEdgeType(site.kind as Reference['kind']);
+  if (callerGraphId === undefined) return false;
+  if (targetGraphId === undefined) return false;
+  if (edgeType === undefined) return false;
+
+  const dedupKey = `${edgeType}:${callerGraphId}->${targetGraphId}:${site.atRange.startLine}:${site.atRange.startCol}`;
+  if (seen.has(dedupKey)) return false;
+  seen.add(dedupKey);
+
+  graph.addRelationship({
+    id: `rel:${dedupKey}`,
+    sourceId: callerGraphId,
+    targetId: targetGraphId,
+    type: edgeType,
+    confidence: 0.85,
+    reason,
+  });
+  return true;
+}
+
+/**
  * Walk the scope chain from `startScope` upward looking for the first
  * scope whose `ownedDefs` contains a Function/Method/Class — that's
  * our caller anchor. Translate via `nodeLookup` to the graph-node ID.
@@ -399,11 +656,13 @@ function resolveCallerGraphId(
 ): string | undefined {
   let current: ScopeId | null = startScope;
   const visited = new Set<ScopeId>();
+  let lastFilePath: string | undefined;
   while (current !== null) {
     if (visited.has(current)) return undefined;
     visited.add(current);
     const scope = scopes.scopeTree.getScope(current);
-    if (scope === undefined) return undefined;
+    if (scope === undefined) break;
+    lastFilePath = scope.filePath;
 
     // Prefer Function/Method anchors; fall back to Class.
     const fnDef = scope.ownedDefs.find(
@@ -419,6 +678,14 @@ function resolveCallerGraphId(
       if (id !== undefined) return id;
     }
     current = scope.parent;
+  }
+  // Module-level calls (e.g. Python `u = models.User()` at top level) have
+  // no enclosing function/method/class — fall back to the File node for
+  // the scope's filePath so those calls still get an edge source. Matches
+  // legacy DAG behavior where module-level CALLS edges originate from
+  // the file symbol.
+  if (lastFilePath !== undefined) {
+    return generateId('File', lastFilePath);
   }
   return undefined;
 }
