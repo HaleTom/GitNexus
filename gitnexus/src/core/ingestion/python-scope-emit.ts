@@ -28,18 +28,14 @@
 
 import type {
   ParsedFile,
-  Reference,
   RegistryProviders,
   Scope,
   ScopeId,
-  SymbolDefinition,
-  TypeRef,
   WorkspaceIndex,
 } from 'gitnexus-shared';
 import type { KnowledgeGraph } from '../graph/types.js';
 import { extractParsedFile } from './scope-extractor-bridge.js';
 import { finalizeScopeModel } from './finalize-orchestrator.js';
-import type { ScopeResolutionIndexes } from './model/scope-resolution-indexes.js';
 import { resolveReferenceSites, type ResolveStats } from './resolve-references.js';
 import { pythonProvider } from './languages/python.js';
 import {
@@ -51,21 +47,16 @@ import {
 import {
   buildGraphNodeLookup,
   buildPopulatedMethodDispatch,
-  collectNamespaceTargets,
   emitFreeCallFallback,
   emitImportEdges,
+  emitReceiverBoundCalls,
   emitReferencesViaLookup,
-  findClassBindingInScope,
-  findEnclosingClassDef,
-  findExportedDef,
-  findExportedDefByName,
-  findOwnedMember,
-  findReceiverTypeBinding,
   propagateImportedReturnTypes,
   resolveDefGraphId,
-  tryEmitEdge,
+  type EmitProvider,
   type GraphNodeLookup,
 } from './emit-core/index.js';
+import { SupportedLanguages } from 'gitnexus-shared';
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
@@ -200,8 +191,8 @@ export function runPythonScopeResolution(
     indexes,
     parsedFiles,
     nodeLookup,
-    referenceIndex,
     handledSites,
+    pythonEmitProviderInline,
   );
   const freeCallExtras = emitFreeCallFallback(
     graph,
@@ -321,435 +312,6 @@ function buildPythonMro(
 }
 
 /**
- * Emit CALLS / ACCESSES edges for dotted references whose receiver is a
- * namespace-import binding (`import models; models.User()`) or a class
- * name in the call scope (`Dog.classify("dog")`).
- *
- * The shared `MethodRegistry.lookup` only walks `scope.typeBindings`
- * when resolving an explicit receiver. It never consults `scope.bindings`
- * for namespace/class-kind entries, nor does it follow an
- * `ImportEdge.targetModuleScope` for cross-module lookups. Rather than
- * widen the shared contract, this Python-specific pass closes the gap
- * with a direct receiver → target walk.
- */
-function emitReceiverBoundCalls(
-  graph: KnowledgeGraph,
-  scopes: ScopeResolutionIndexes,
-  parsedFiles: readonly ParsedFile[],
-  nodeLookup: GraphNodeLookup,
-  referenceIndex: { readonly bySourceScope: ReadonlyMap<ScopeId, readonly Reference[]> },
-  handledSites: Set<string>,
-): number {
-  let emitted = 0;
-  // `seen` is the per-pass dedup so the multiple Cases below don't
-  // double-emit if two of them resolve the same site to the same
-  // target. Pre-seeding from the shared resolver was historically
-  // useful when emit-references ran FIRST, but now the order is
-  // reversed (emit-references comes after this pass and uses
-  // `handledSites` to skip what we processed). Keeping the pre-seed
-  // would suppress legitimate emissions for sites the shared resolver
-  // happened to also resolve.
-  const seen = new Set<string>();
-  void referenceIndex; // kept in signature for parity with future passes
-
-  // Class def → Class scope map (for field-chain field-type lookup).
-  // The class scope's `ownedDefs` contains the Class def per pass2's
-  // structural-ownership rule.
-  const classScopeByDefId = new Map<string, Scope>();
-  for (const p of parsedFiles) {
-    for (const scope of p.scopes) {
-      if (scope.kind !== 'Class') continue;
-      const cd = scope.ownedDefs.find((d) => d.type === 'Class');
-      if (cd !== undefined) classScopeByDefId.set(cd.nodeId, scope);
-    }
-  }
-
-  for (const parsed of parsedFiles) {
-    const namespaceTargets = collectNamespaceTargets(parsed, scopes);
-
-    for (const site of parsed.referenceSites) {
-      if (site.kind !== 'call' && site.kind !== 'read' && site.kind !== 'write') continue;
-      if (site.explicitReceiver === undefined) continue;
-
-      const receiverName = site.explicitReceiver.name;
-      const memberName = site.name;
-      const siteKey = `${parsed.filePath}:${site.atRange.startLine}:${site.atRange.startCol}`;
-
-      // ── super() — resolve to the enclosing class's PARENT (first MRO entry).
-      // Python's `super()` inside a method dispatches up the MRO chain.
-      if (/^super\s*\(/.test(receiverName)) {
-        const enclosingClass = findEnclosingClassDef(site.inScope, scopes);
-        if (enclosingClass !== undefined) {
-          const ancestors = scopes.methodDispatch.mroFor(enclosingClass.nodeId);
-          let memberDef: SymbolDefinition | undefined;
-          for (const ownerId of ancestors) {
-            memberDef = findOwnedMember(ownerId, memberName, parsedFiles);
-            if (memberDef !== undefined) break;
-          }
-          if (memberDef !== undefined) {
-            const ok = tryEmitEdge(
-              graph,
-              scopes,
-              nodeLookup,
-              site,
-              memberDef,
-              'python-scope: super-receiver',
-              seen,
-            );
-            if (ok) {
-              emitted++;
-              handledSites.add(siteKey);
-            }
-            continue;
-          }
-        }
-      }
-
-      // ── Case 0: compound receiver (`user.address.save()` or
-      //   `svc.get_user().save()`) — walk the dotted/call chain,
-      //   resolving each segment to a class via field types or
-      //   method return types.
-      if (receiverName.includes('.') || receiverName.includes('(')) {
-        const currentClass = resolveCompoundReceiverClass(
-          receiverName,
-          site.inScope,
-          scopes,
-          parsedFiles,
-          classScopeByDefId,
-        );
-        if (currentClass !== undefined) {
-          const chain = [currentClass.nodeId, ...scopes.methodDispatch.mroFor(currentClass.nodeId)];
-          let memberDef: SymbolDefinition | undefined;
-          for (const ownerId of chain) {
-            memberDef = findOwnedMember(ownerId, memberName, parsedFiles);
-            if (memberDef !== undefined) break;
-          }
-          if (memberDef !== undefined) {
-            const ok = tryEmitEdge(
-              graph,
-              scopes,
-              nodeLookup,
-              site,
-              memberDef,
-              'python-scope: chain-receiver',
-              seen,
-            );
-            if (ok) {
-              emitted++;
-              handledSites.add(siteKey);
-            }
-            continue;
-          }
-        }
-      }
-
-      // ── Case 1: namespace receiver (`import models; models.X()`) ─
-      const targetFile = namespaceTargets.get(receiverName);
-      if (targetFile !== undefined) {
-        const memberDef = findExportedDef(targetFile, memberName, parsedFiles);
-        if (memberDef !== undefined) {
-          const ok = tryEmitEdge(
-            graph,
-            scopes,
-            nodeLookup,
-            site,
-            memberDef,
-            'python-scope: namespace-receiver',
-            seen,
-          );
-          if (ok) {
-            emitted++;
-            handledSites.add(siteKey);
-          }
-          continue;
-        }
-      }
-
-      // ── Case 2: class-name receiver (`Dog.classify()`) ──────────
-      const classDef = findClassBindingInScope(site.inScope, receiverName, scopes);
-      if (classDef !== undefined) {
-        // Walk the MRO so inherited static/class methods resolve.
-        const chain = [classDef.nodeId, ...scopes.methodDispatch.mroFor(classDef.nodeId)];
-        let memberDef: SymbolDefinition | undefined;
-        for (const ownerId of chain) {
-          memberDef = findOwnedMember(ownerId, memberName, parsedFiles);
-          if (memberDef !== undefined) break;
-        }
-        if (memberDef !== undefined) {
-          const ok = tryEmitEdge(
-            graph,
-            scopes,
-            nodeLookup,
-            site,
-            memberDef,
-            'python-scope: class-receiver',
-            seen,
-          );
-          if (ok) {
-            emitted++;
-            handledSites.add(siteKey);
-          }
-          continue;
-        }
-      }
-
-      // ── Case 3: receiver has a dotted typeBinding (`u: models.User`) ──
-      const typeRef = findReceiverTypeBinding(site.inScope, receiverName, scopes);
-      if (typeRef !== undefined && typeRef.rawName.includes('.')) {
-        const [nsName, ...classNameParts] = typeRef.rawName.split('.');
-        const className = classNameParts.join('.');
-        const targetFile3 = namespaceTargets.get(nsName);
-        if (targetFile3 !== undefined && className.length > 0) {
-          const classDef3 = findExportedDef(targetFile3, className, parsedFiles);
-          if (classDef3 !== undefined) {
-            const memberDef = findOwnedMember(classDef3.nodeId, memberName, parsedFiles);
-            if (memberDef !== undefined) {
-              const ok = tryEmitEdge(
-                graph,
-                scopes,
-                nodeLookup,
-                site,
-                memberDef,
-                'python-scope: dotted-typebinding',
-                seen,
-              );
-              if (ok) {
-                emitted++;
-                handledSites.add(siteKey);
-              }
-              continue;
-            }
-          }
-        }
-      }
-
-      // ── Case 3b: receiver's typeBinding is a method-call chain
-      // (`city → user.get_city`). The constructor-inferred capture for
-      // `city = user.get_city()` stores the attribute text without
-      // parens. Treat as a call-shape and run through the compound
-      // resolver, which now also field-walks when the method isn't
-      // owned by the receiver's class.
-      if (
-        typeRef !== undefined &&
-        typeRef.rawName.includes('.') &&
-        !typeRef.rawName.includes('(') &&
-        !namespaceTargets.has(typeRef.rawName.split('.')[0]!)
-      ) {
-        const ownerDef = resolveCompoundReceiverClass(
-          typeRef.rawName + '()',
-          typeRef.declaredAtScope,
-          scopes,
-          parsedFiles,
-          classScopeByDefId,
-        );
-        if (ownerDef !== undefined) {
-          const chain = [ownerDef.nodeId, ...scopes.methodDispatch.mroFor(ownerDef.nodeId)];
-          let memberDef: SymbolDefinition | undefined;
-          for (const ownerId of chain) {
-            memberDef = findOwnedMember(ownerId, memberName, parsedFiles);
-            if (memberDef !== undefined) break;
-          }
-          if (memberDef !== undefined) {
-            const ok = tryEmitEdge(
-              graph,
-              scopes,
-              nodeLookup,
-              site,
-              memberDef,
-              'python-scope: chain-typebinding',
-              seen,
-            );
-            if (ok) {
-              emitted++;
-              handledSites.add(siteKey);
-            }
-            continue;
-          }
-        }
-      }
-
-      // ── Case 4: simple typeBinding (`u: U` where U is aliased import)
-      if (typeRef !== undefined && !typeRef.rawName.includes('.')) {
-        const ownerDef = findClassBindingInScope(site.inScope, typeRef.rawName, scopes);
-        if (ownerDef !== undefined) {
-          const chain = [ownerDef.nodeId, ...scopes.methodDispatch.mroFor(ownerDef.nodeId)];
-          let memberDef: SymbolDefinition | undefined;
-          for (const ownerId of chain) {
-            memberDef = findOwnedMember(ownerId, memberName, parsedFiles);
-            if (memberDef !== undefined) break;
-          }
-          if (memberDef !== undefined) {
-            // For read/write ACCESSES, mirror the legacy DAG's reason
-            // convention (just the kind word) so consumers asserting
-            // `reason === 'write'` keep working.
-            const reason =
-              site.kind === 'write' || site.kind === 'read'
-                ? site.kind
-                : 'python-scope: typeref-receiver';
-            const ok = tryEmitEdge(graph, scopes, nodeLookup, site, memberDef, reason, seen);
-            if (ok) {
-              emitted++;
-              handledSites.add(siteKey);
-            }
-          }
-        }
-      }
-    }
-  }
-
-  return emitted;
-}
-
-/** Max depth for compound-receiver chain resolution (`a().b().c().d()`).
- *  Practical Python rarely exceeds 3-4 hops; the cap just prevents
- *  pathological recursion if the receiver text turns out to be malformed. */
-const COMPOUND_RECEIVER_MAX_DEPTH = 4;
-
-/**
- * Resolve a compound-receiver expression's TYPE (the class def of the
- * value it produces). Handles three shapes:
- *   - bare identifier `name` — look up via typeBinding chain
- *   - dotted `obj.field[.field]…` — walk fields via class-scope typeBindings
- *   - call `expr.method()` — recurse into expr, find method's return-type
- *     typeBinding on its class, resolve to a class
- *
- * Returns the class `SymbolDefinition` or undefined if the chain dead-ends.
- * Depth-capped at COMPOUND_RECEIVER_MAX_DEPTH.
- */
-function resolveCompoundReceiverClass(
-  receiverText: string,
-  inScope: ScopeId,
-  scopes: ScopeResolutionIndexes,
-  parsedFiles: readonly ParsedFile[],
-  classScopeByDefId: ReadonlyMap<string, Scope>,
-  depth = 0,
-): SymbolDefinition | undefined {
-  if (depth > COMPOUND_RECEIVER_MAX_DEPTH) return undefined;
-  const text = receiverText.trim();
-  if (text.length === 0) return undefined;
-
-  // Bare identifier — resolve via typeBinding then class lookup.
-  if (!text.includes('.') && !text.includes('(')) {
-    const tb = findReceiverTypeBinding(inScope, text, scopes);
-    if (tb === undefined) return undefined;
-    return findClassBindingInScope(tb.declaredAtScope, tb.rawName, scopes);
-  }
-
-  // Trailing `()` — call expression. Strip it and resolve the function
-  // expression's return type. We only handle the canonical `f()` /
-  // `obj.method()` shape; nested-arg expressions like `f(g())` are
-  // out of scope for V1 (depth-capped recursion catches infinite loops).
-  if (text.endsWith(')')) {
-    // Find the matching `(` by walking from end with a depth counter
-    // so nested parens in args don't fool us.
-    const openIdx = matchingOpenParen(text);
-    if (openIdx === -1) return undefined;
-    const fnExpr = text.slice(0, openIdx).trim();
-    if (fnExpr.length === 0) return undefined;
-
-    // Split into receiver and method name on the LAST dot.
-    const lastDot = fnExpr.lastIndexOf('.');
-    if (lastDot === -1) {
-      // Free call `name()`. Look up function in scope, then its
-      // return-type typeBinding (which lives in the function's
-      // enclosing scope per Pass 4 hoist).
-      const fnDef = findExportedDefByName(fnExpr, inScope, scopes, parsedFiles);
-      if (fnDef === undefined) return undefined;
-      // The return-type binding key == the function's simple name in
-      // the scope where the function is bound. Walk for it.
-      const retType = findReceiverTypeBinding(inScope, fnExpr, scopes);
-      if (retType === undefined) return undefined;
-      return findClassBindingInScope(retType.declaredAtScope, retType.rawName, scopes);
-    }
-    // `obj.method()` — resolve obj's class, look up method, then its
-    // return-type typeBinding on that class scope.
-    const objExpr = fnExpr.slice(0, lastDot);
-    const methodName = fnExpr.slice(lastDot + 1);
-    const objClass = resolveCompoundReceiverClass(
-      objExpr,
-      inScope,
-      scopes,
-      parsedFiles,
-      classScopeByDefId,
-      depth + 1,
-    );
-    if (objClass === undefined) return undefined;
-    // Walk the MRO so methods inherited from ancestors resolve. A class
-    // owning the method itself doesn't always exist — `class C(B)` may
-    // inherit `greet` from B (or B's parent A), and the return-type
-    // typeBinding lives on the SCOPE OF THE CLASS THAT OWNS THE METHOD.
-    let retType: TypeRef | undefined;
-    const ownerChain = [objClass.nodeId, ...scopes.methodDispatch.mroFor(objClass.nodeId)];
-    for (const ownerId of ownerChain) {
-      const cs = classScopeByDefId.get(ownerId);
-      const candidate = cs?.typeBindings.get(methodName);
-      if (candidate !== undefined) {
-        retType = candidate;
-        break;
-      }
-    }
-    // Field-fallback: if the receiver class has no `methodName` itself,
-    // walk its fields and try the same lookup on each field's type.
-    // Matches the "unified fixpoint" behavior tested by the
-    // method-chain fixture where `user.get_city()` reaches
-    // `Address.get_city` through User's `address: Address` field.
-    if (retType === undefined) {
-      const objCs = classScopeByDefId.get(objClass.nodeId);
-      if (objCs !== undefined) {
-        for (const [, fieldType] of objCs.typeBindings) {
-          const fieldClass = findClassBindingInScope(
-            fieldType.declaredAtScope,
-            fieldType.rawName,
-            scopes,
-          );
-          if (fieldClass === undefined) continue;
-          const fcs = classScopeByDefId.get(fieldClass.nodeId);
-          const candidate = fcs?.typeBindings.get(methodName);
-          if (candidate !== undefined) {
-            retType = candidate;
-            break;
-          }
-        }
-      }
-    }
-    if (retType === undefined) return undefined;
-    return findClassBindingInScope(retType.declaredAtScope, retType.rawName, scopes);
-  }
-
-  // Pure dotted access `obj.field[.field]…` — walk fields.
-  const parts = text.split('.');
-  const head = parts[0]!;
-  const headType = findReceiverTypeBinding(inScope, head, scopes);
-  let currentClass: SymbolDefinition | undefined = headType
-    ? findClassBindingInScope(headType.declaredAtScope, headType.rawName, scopes)
-    : undefined;
-  for (let i = 1; i < parts.length && currentClass !== undefined; i++) {
-    const fieldName = parts[i]!;
-    const cs = classScopeByDefId.get(currentClass.nodeId);
-    const fieldType = cs?.typeBindings.get(fieldName);
-    if (fieldType === undefined) return undefined;
-    currentClass = findClassBindingInScope(fieldType.declaredAtScope, fieldType.rawName, scopes);
-  }
-  return currentClass;
-}
-
-/** Find the index of the `(` that matches the trailing `)` of a
- *  call-expression text. Returns -1 if unbalanced. */
-function matchingOpenParen(text: string): number {
-  if (!text.endsWith(')')) return -1;
-  let depth = 0;
-  for (let i = text.length - 1; i >= 0; i--) {
-    const ch = text[i];
-    if (ch === ')') depth++;
-    else if (ch === '(') {
-      depth--;
-      if (depth === 0) return i;
-    }
-  }
-  return -1;
-}
-
-/**
  * Populate `ownerId` on Method/Function/Field defs that live structurally
  * inside a `Class` scope.
  *
@@ -794,3 +356,16 @@ function populateMethodOwnerIds(parsed: ParsedFile): void {
     }
   }
 }
+
+/** Minimal `EmitProvider` carrying only the hooks the receiver-bound
+ *  pass currently consults. The full provider (with mergeBindings,
+ *  resolveImportTarget, arityCompatibility, buildMro, populateOwners)
+ *  lands in G-Unit 6 when it moves to `languages/python/emit/`. */
+const pythonEmitProviderInline: Pick<
+  EmitProvider,
+  'language' | 'isSuperReceiver' | 'fieldFallbackOnMethodLookup'
+> = {
+  language: SupportedLanguages.Python,
+  isSuperReceiver: (text) => /^super\s*\(/.test(text),
+  fieldFallbackOnMethodLookup: true,
+};
