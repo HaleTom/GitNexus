@@ -65,14 +65,22 @@ export interface ParseOutput {
    */
   readonly usedWorkerPool: boolean;
   /**
-   * AST cache populated by the sequential parse path. Empty entries
-   * for files that ran through the worker pool (workers can't return
-   * native tree-sitter Trees across the MessageChannel). Downstream
-   * phases (scope-resolution) read from this to skip re-parsing —
-   * cache miss is safe and falls back to a fresh parse. See plan
+   * Cross-phase tree-sitter Tree cache populated by the sequential
+   * parse path. Separate from the chunk-local `astCache` used *inside*
+   * the parse phase (which is cleared between chunks) — this one
+   * survives the whole phase and hands Trees to scope-resolution so
+   * it can skip a second parse.
+   *
+   * Empty entries for files that ran through the worker pool
+   * (workers can't return native tree-sitter Trees across the
+   * MessageChannel). Cache miss is safe — consumers fall back to a
+   * fresh parse. See plan
    * docs/plans/2026-04-20-002-perf-parse-heritage-mro-plan.md (Unit 4).
+   *
+   * Disposed by `scopeResolutionPhase` (the sole consumer) via
+   * `scopeTreeCache.clear()` after its extract loop finishes.
    */
-  readonly astCache: ASTCache;
+  readonly scopeTreeCache: ASTCache;
 }
 
 export const parsePhase: PipelinePhase<ParseOutput> = {

@@ -36,6 +36,7 @@ import { readFileContents } from '../../filesystem-walker.js';
 import { runScopeResolution } from './run.js';
 import { SCOPE_RESOLVERS } from './registry.js';
 import { isDev } from '../../utils/env.js';
+import type { ASTCacheReader } from '../../ast-cache.js';
 
 export interface ScopeResolutionOutput {
   /** True when at least one language ran. */
@@ -82,9 +83,7 @@ export const scopeResolutionPhase: PipelinePhase<ScopeResolutionOutput> = {
     // skip a second tree-sitter parse. Cache miss is safe (re-parses).
     // Worker-mode parses leave the cache empty for those files; they
     // also fall back to a fresh parse — no correctness impact.
-    const { astCache } = getPhaseOutput<{
-      astCache: { get(path: string): unknown; clear(): void };
-    }>(deps, 'parse');
+    const { scopeTreeCache } = getPhaseOutput<{ scopeTreeCache: ASTCacheReader }>(deps, 'parse');
 
     let totalFiles = 0;
     let totalImports = 0;
@@ -117,7 +116,7 @@ export const scopeResolutionPhase: PipelinePhase<ScopeResolutionOutput> = {
         {
           graph: ctx.graph,
           files,
-          treeCache: astCache,
+          treeCache: scopeTreeCache,
           onWarn: (msg) => {
             if (isDev) console.warn(`[scope-resolution:${lang}] ${msg}`);
           },
@@ -148,7 +147,7 @@ export const scopeResolutionPhase: PipelinePhase<ScopeResolutionOutput> = {
     // never read them, and tree-sitter Trees hold native-heap memory
     // under WASM runtimes. ASTCache.clear() fires the LRU dispose
     // handler which calls tree.delete?.() on each retained Tree.
-    astCache.clear();
+    scopeTreeCache.clear();
 
     if (!anyRan) return NOOP_OUTPUT;
 

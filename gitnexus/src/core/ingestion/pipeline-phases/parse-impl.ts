@@ -109,13 +109,15 @@ export async function runChunkedParseAndResolve(
   bindingAccumulator: BindingAccumulator;
   resolutionContext: ReturnType<typeof createResolutionContext>;
   usedWorkerPool: boolean;
-  /** AST cache populated by the sequential parse path. Empty when
+  /** Cross-phase tree-sitter Tree cache populated by the sequential
+   *  parse path. Distinct from the chunk-local `astCache` used inside
+   *  the parse loop (that one is cleared between chunks). Empty when
    *  every chunk ran via the worker pool (workers can't return native
    *  tree-sitter Trees across the MessageChannel). Downstream phases
-   *  (e.g. scope-resolution) read from this to skip re-parsing the
-   *  same source. See plan
+   *  (scope-resolution) read from this to skip re-parsing the same
+   *  source. See plan
    *  docs/plans/2026-04-20-002-perf-parse-heritage-mro-plan.md (Unit 4). */
-  astCache: ASTCache;
+  scopeTreeCache: ASTCache;
 }> {
   const ctx = createResolutionContext();
   const symbolTable = ctx.model.symbols;
@@ -617,6 +619,6 @@ export async function runChunkedParseAndResolve(
     // sequential path already parsed. Survives chunk boundaries; the
     // chunk-local `astCache` above is intentionally NOT exposed
     // because parse-impl clears it between chunks.
-    astCache: scopeTreeCache,
+    scopeTreeCache,
   };
 }

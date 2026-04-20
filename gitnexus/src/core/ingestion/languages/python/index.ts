@@ -22,6 +22,7 @@
 
 export { PYTHON_SCOPE_QUERY } from './query.js';
 export { emitPythonScopeCaptures } from './captures.js';
+export { getPythonCaptureCacheStats, resetPythonCaptureCacheStats } from './cache-stats.js';
 export { interpretPythonImport, interpretPythonTypeBinding } from './interpret.js';
 export { pythonMergeBindings } from './merge-bindings.js';
 export { pythonArityCompatibility } from './arity.js';

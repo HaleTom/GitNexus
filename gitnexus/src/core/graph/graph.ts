@@ -17,6 +17,24 @@ export const createKnowledgeGraph = (): KnowledgeGraph => {
   // docs/plans/2026-04-20-002-perf-parse-heritage-mro-plan.md (Unit 1).
   const relationshipsByType = new Map<RelationshipType, Map<string, GraphRelationship>>();
 
+  // Private helpers that encode the dual-index invariant in one place.
+  // All mutation paths (addRelationship, removeRelationship, removeNode)
+  // go through these — adding a new mutation method only needs to call
+  // writeRel / deleteRel, not remember to touch both maps.
+  const writeRel = (rel: GraphRelationship): void => {
+    relationshipMap.set(rel.id, rel);
+    let bucket = relationshipsByType.get(rel.type);
+    if (bucket === undefined) {
+      bucket = new Map();
+      relationshipsByType.set(rel.type, bucket);
+    }
+    bucket.set(rel.id, rel);
+  };
+  const deleteRel = (rel: GraphRelationship): void => {
+    relationshipMap.delete(rel.id);
+    relationshipsByType.get(rel.type)?.delete(rel.id);
+  };
+
   const addNode = (node: GraphNode) => {
     if (!nodeMap.has(node.id)) {
       nodeMap.set(node.id, node);
@@ -25,13 +43,7 @@ export const createKnowledgeGraph = (): KnowledgeGraph => {
 
   const addRelationship = (relationship: GraphRelationship) => {
     if (relationshipMap.has(relationship.id)) return;
-    relationshipMap.set(relationship.id, relationship);
-    let bucket = relationshipsByType.get(relationship.type);
-    if (bucket === undefined) {
-      bucket = new Map();
-      relationshipsByType.set(relationship.type, bucket);
-    }
-    bucket.set(relationship.id, relationship);
+    writeRel(relationship);
   };
 
   /**
@@ -42,12 +54,9 @@ export const createKnowledgeGraph = (): KnowledgeGraph => {
 
     nodeMap.delete(nodeId);
 
-    // Remove all relationships involving this node — clean up both
-    // indexes in lockstep so the per-type buckets never drift.
-    for (const [relId, rel] of relationshipMap) {
+    for (const rel of relationshipMap.values()) {
       if (rel.sourceId === nodeId || rel.targetId === nodeId) {
-        relationshipMap.delete(relId);
-        relationshipsByType.get(rel.type)?.delete(relId);
+        deleteRel(rel);
       }
     }
     return true;
@@ -60,8 +69,7 @@ export const createKnowledgeGraph = (): KnowledgeGraph => {
   const removeRelationship = (relationshipId: string): boolean => {
     const rel = relationshipMap.get(relationshipId);
     if (rel === undefined) return false;
-    relationshipMap.delete(relationshipId);
-    relationshipsByType.get(rel.type)?.delete(relationshipId);
+    deleteRel(rel);
     return true;
   };
 
