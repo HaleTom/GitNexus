@@ -258,8 +258,28 @@ describe('createKnowledgeGraph', () => {
       g.addRelationship(makeRel('cls:X', 'cls:Y', 'EXTENDS'));
       g.addRelationship(makeRel('cls:Y', 'cls:Z', 'EXTENDS'));
 
-      expect([...g.iterRelationshipsByType('CALLS')]).toHaveLength(2);
-      expect([...g.iterRelationshipsByType('EXTENDS')]).toHaveLength(2);
+      const calls = [...g.iterRelationshipsByType('CALLS')];
+      const extends_ = [...g.iterRelationshipsByType('EXTENDS')];
+      expect(calls).toHaveLength(2);
+      expect(extends_).toHaveLength(2);
+      // Identity assertions guard against a bucket-key swap bug that
+      // would return the wrong edges with the right count.
+      expect(calls.every((r) => r.type === 'CALLS')).toBe(true);
+      expect(extends_.every((r) => r.type === 'EXTENDS')).toBe(true);
+      expect(new Set(calls.map((r) => r.sourceId))).toEqual(new Set(['fn:a', 'fn:b']));
+    });
+
+    it('retains an empty bucket after last edge removed and reuses it on re-add', () => {
+      const g = createKnowledgeGraph();
+      g.addRelationship(makeRel('cls:X', 'cls:Y', 'EXTENDS'));
+      expect([...g.iterRelationshipsByType('EXTENDS')]).toHaveLength(1);
+      g.removeRelationship('cls:X-EXTENDS-cls:Y');
+      expect([...g.iterRelationshipsByType('EXTENDS')]).toHaveLength(0);
+      // Re-add the same type — bucket must still be live.
+      g.addRelationship(makeRel('cls:A', 'cls:B', 'EXTENDS'));
+      const again = [...g.iterRelationshipsByType('EXTENDS')];
+      expect(again).toHaveLength(1);
+      expect(again[0].sourceId).toBe('cls:A');
     });
 
     it('returns a fresh empty iterator when the type has no edges', () => {

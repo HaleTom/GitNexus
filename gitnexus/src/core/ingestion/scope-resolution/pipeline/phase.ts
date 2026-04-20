@@ -82,10 +82,9 @@ export const scopeResolutionPhase: PipelinePhase<ScopeResolutionOutput> = {
     // skip a second tree-sitter parse. Cache miss is safe (re-parses).
     // Worker-mode parses leave the cache empty for those files; they
     // also fall back to a fresh parse — no correctness impact.
-    const { astCache } = getPhaseOutput<{ astCache: { get(path: string): unknown } }>(
-      deps,
-      'parse',
-    );
+    const { astCache } = getPhaseOutput<{
+      astCache: { get(path: string): unknown; clear(): void };
+    }>(deps, 'parse');
 
     let totalFiles = 0;
     let totalImports = 0;
@@ -142,6 +141,14 @@ export const scopeResolutionPhase: PipelinePhase<ScopeResolutionOutput> = {
         );
       }
     }
+
+    // Dispose the cross-phase Tree cache — scope-resolution is the
+    // only consumer. Holding Trees past this point is pure memory
+    // pressure: downstream phases (mro, community, csv-generator)
+    // never read them, and tree-sitter Trees hold native-heap memory
+    // under WASM runtimes. ASTCache.clear() fires the LRU dispose
+    // handler which calls tree.delete?.() on each retained Tree.
+    astCache.clear();
 
     if (!anyRan) return NOOP_OUTPUT;
 

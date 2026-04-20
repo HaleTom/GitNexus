@@ -381,11 +381,15 @@ const processParsingSequential = async (
     }
 
     astCache.set(file.path, tree);
-    // Mirror into the cross-phase cache when supplied. parse-impl
-    // clears `astCache` between chunks; `scopeTreeCache` survives.
-    scopeTreeCache?.set(file.path, tree);
 
     const provider = getProvider(language);
+    // Mirror into the cross-phase cache only when the language has a
+    // scope-resolution consumer — otherwise we retain Trees no one
+    // reads. parse-impl clears `astCache` between chunks;
+    // `scopeTreeCache` survives until scope-resolution disposes it.
+    if (provider.emitScopeCaptures !== undefined) {
+      scopeTreeCache?.set(file.path, tree);
+    }
     const queryString = provider.treeSitterQueries;
     if (!queryString) {
       continue;
@@ -715,6 +719,15 @@ export const processParsing = async (
   workerPool?: WorkerPool,
 ): Promise<WorkerExtractedData | null> => {
   if (workerPool) {
+    if (scopeTreeCache !== undefined && process.env.PROF_SCOPE_RESOLUTION === '1') {
+      // Trees can't cross MessageChannels, so worker-parsed files land
+      // in scope-resolution with an empty cache and get re-parsed.
+      // Surfacing this in PROF mode prevents silent perf cliffs when
+      // a repo crosses the worker-pool threshold.
+      console.warn(
+        `[scope-resolution prof] worker pool engaged for ${files.length} files — cross-phase tree cache will be empty; scope-resolution re-parses.`,
+      );
+    }
     try {
       return await processParsingWithWorkers(
         graph,
