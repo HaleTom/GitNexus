@@ -639,7 +639,9 @@ function emitFreeCallFallback(
         targetId: tgtGraphId,
         type: 'CALLS',
         confidence: 0.85,
-        reason: 'python-scope: free-call-import',
+        // Match legacy DAG's reason convention so consumers that
+        // assert `reason === 'import-resolved'` keep working.
+        reason: fnDef.filePath !== parsed.filePath ? 'import-resolved' : 'local-call',
       });
       emitted++;
     }
