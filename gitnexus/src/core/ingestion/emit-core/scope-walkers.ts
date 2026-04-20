@@ -138,6 +138,52 @@ export function findCallableBindingInScope(
 }
 
 /**
+ * Populate `ownerId` on every def structurally owned by a Class
+ * scope — methods (defs in Function scopes whose parent is Class)
+ * and class-body fields (defs directly in Class scopes).
+ *
+ * Generic OO ownership rule. Languages that want richer ownership
+ * (e.g. inner-class qualification) can compose with this as a base
+ * step.
+ *
+ * Mutates `parsed.localDefs` in place via type cast — `SymbolDefinition`
+ * is `readonly` for consumers but the extractor returns plain objects.
+ * Defs are shared by reference between `localDefs` and `Scope.ownedDefs`,
+ * so this single mutation is visible from both sides.
+ */
+export function populateClassOwnedMembers(parsed: ParsedFile): void {
+  const scopesById = new Map<ScopeId, ParsedFile['scopes'][number]>();
+  for (const scope of parsed.scopes) scopesById.set(scope.id, scope);
+
+  for (const scope of parsed.scopes) {
+    // Methods: function scope whose parent is a Class scope. Owner is
+    // the parent's Class def.
+    if (scope.parent !== null) {
+      const parentScope = scopesById.get(scope.parent);
+      if (parentScope !== undefined && parentScope.kind === 'Class') {
+        const classDef = parentScope.ownedDefs.find((d) => d.type === 'Class');
+        if (classDef !== undefined) {
+          for (const def of scope.ownedDefs) {
+            (def as { ownerId?: string }).ownerId = classDef.nodeId;
+          }
+        }
+      }
+    }
+    // Class-body fields: defs directly owned by a Class scope (the
+    // class def itself excluded).
+    if (scope.kind === 'Class') {
+      const classDef = scope.ownedDefs.find((d) => d.type === 'Class');
+      if (classDef !== undefined) {
+        for (const def of scope.ownedDefs) {
+          if (def === classDef) continue;
+          (def as { ownerId?: string }).ownerId = classDef.nodeId;
+        }
+      }
+    }
+  }
+}
+
+/**
  * Walk a scope chain upward looking for the innermost enclosing
  * Class scope and return that class's def. Used by per-language
  * `super` receiver branches to discover the dispatch base.

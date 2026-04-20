@@ -26,13 +26,7 @@
  * not here — this function is "what to do" once we've decided to do it.
  */
 
-import type {
-  ParsedFile,
-  RegistryProviders,
-  Scope,
-  ScopeId,
-  WorkspaceIndex,
-} from 'gitnexus-shared';
+import type { ParsedFile, RegistryProviders, Scope, WorkspaceIndex } from 'gitnexus-shared';
 import type { KnowledgeGraph } from '../graph/types.js';
 import { extractParsedFile } from './scope-extractor-bridge.js';
 import { finalizeScopeModel } from './finalize-orchestrator.js';
@@ -46,15 +40,16 @@ import {
 } from './languages/python/index.js';
 import {
   buildGraphNodeLookup,
+  buildMro,
   buildPopulatedMethodDispatch,
+  defaultLinearize,
   emitFreeCallFallback,
   emitImportEdges,
   emitReceiverBoundCalls,
   emitReferencesViaLookup,
+  populateClassOwnedMembers,
   propagateImportedReturnTypes,
-  resolveDefGraphId,
   type EmitProvider,
-  type GraphNodeLookup,
 } from './emit-core/index.js';
 import { SupportedLanguages } from 'gitnexus-shared';
 
@@ -99,7 +94,7 @@ export function runPythonScopeResolution(
       filesSkipped++;
       continue;
     }
-    populateMethodOwnerIds(parsed);
+    populateClassOwnedMembers(parsed);
     parsedFiles.push(parsed);
   }
 
@@ -122,7 +117,7 @@ export function runPythonScopeResolution(
   // mirror them into a `MethodDispatchIndex` so receiver-typed
   // resolution can walk inherited methods.
   const nodeLookup = buildGraphNodeLookup(graph);
-  const mroByClassDefId = buildPythonMro(graph, parsedFiles, nodeLookup);
+  const mroByClassDefId = buildMro(graph, parsedFiles, nodeLookup, defaultLinearize);
 
   const indexes = finalizeScopeModel(parsedFiles, {
     hooks: {
@@ -238,123 +233,6 @@ export function runPythonScopeResolution(
     referenceEdgesEmitted: emitted + receiverExtras + freeCallExtras,
     referenceSkipped: skipped,
   };
-}
-
-// ─── Python-specific internals (move to languages/python/emit/ in Unit 11) ──
-
-/**
- * Build a Python MRO map keyed by scope-resolution Class `DefId`.
- *
- * The legacy `parse` phase has already emitted EXTENDS edges into the
- * graph (via the heritage processor in `parsing-processor.ts`) by the
- * time this orchestrator runs (we depend on `parse`). We mirror those
- * edges into a `DefId → ancestor DefId[]` map so receiver-typed
- * `MethodRegistry.lookup` can walk inherited methods.
- *
- * MRO ordering: this is a **simple linear walk** (depth-first parent
- * chain, dedup by first-seen). Full Python C3 linearization lives in
- * the legacy heritage processor; replicating it here is out of scope
- * for the first cut. The single-inheritance case — which covers the
- * existing fixture suite (`User → BaseModel`, `Child → Parent`,
- * `Grandchild → Child → Parent`) — is identical to C3, so the
- * difference only surfaces with diamond hierarchies. Tracked as a
- * follow-up alongside generalizing this orchestrator across languages.
- */
-function buildPythonMro(
-  graph: KnowledgeGraph,
-  parsedFiles: readonly ParsedFile[],
-  nodeLookup: GraphNodeLookup,
-): Map<string /* DefId */, string[] /* DefId[] */> {
-  // Step 1: build (graph node id) → (parent graph node id[]) from
-  // EXTENDS edges. Python only has class inheritance via `class
-  // Child(Parent)`, which the heritage processor maps to EXTENDS
-  // (not IMPLEMENTS).
-  const parentsByGraphId = new Map<string, string[]>();
-  for (const rel of graph.iterRelationships()) {
-    if (rel.type !== 'EXTENDS') continue;
-    let list = parentsByGraphId.get(rel.sourceId);
-    if (list === undefined) {
-      list = [];
-      parentsByGraphId.set(rel.sourceId, list);
-    }
-    list.push(rel.targetId);
-  }
-
-  // Step 2: collect every Class def from the parsed scope model and
-  // build a graph-node → DefId reverse map.
-  const defIdByGraphId = new Map<string, string>();
-  for (const parsed of parsedFiles) {
-    for (const def of parsed.localDefs) {
-      if (def.type !== 'Class') continue;
-      const graphId = resolveDefGraphId(parsed.filePath, def, nodeLookup);
-      if (graphId !== undefined) defIdByGraphId.set(graphId, def.nodeId);
-    }
-  }
-
-  // Step 3: for each Class def, walk parents transitively (depth-first,
-  // first-seen-wins) and translate each ancestor back to its DefId.
-  const mroByDefId = new Map<string, string[]>();
-  for (const [graphId, defId] of defIdByGraphId) {
-    const ancestors: string[] = [];
-    const visited = new Set<string>();
-    const queue: string[] = [...(parentsByGraphId.get(graphId) ?? [])];
-    while (queue.length > 0) {
-      const cur = queue.shift()!;
-      if (visited.has(cur)) continue;
-      visited.add(cur);
-      const ancDefId = defIdByGraphId.get(cur);
-      if (ancDefId !== undefined) ancestors.push(ancDefId);
-      for (const p of parentsByGraphId.get(cur) ?? []) queue.push(p);
-    }
-    mroByDefId.set(defId, ancestors);
-  }
-  return mroByDefId;
-}
-
-/**
- * Populate `ownerId` on Method/Function/Field defs that live structurally
- * inside a `Class` scope.
- *
- * Python's ownership rule: methods belong to the lexically enclosing
- * class. Applied before finalize so `MethodRegistry.lookup` Step 2
- * (`collectOwnedMembers`) finds candidates by class owner.
- *
- * Mutates `parsed.localDefs` in place via type cast — `SymbolDefinition`
- * is `readonly` for consumers but the extractor returns plain objects.
- * Defs are shared by reference between `localDefs` and `Scope.ownedDefs`,
- * so this single mutation is visible from both sides.
- */
-function populateMethodOwnerIds(parsed: ParsedFile): void {
-  const scopesById = new Map<ScopeId, Scope>();
-  for (const scope of parsed.scopes) scopesById.set(scope.id, scope);
-
-  for (const scope of parsed.scopes) {
-    // Methods (Function scopes whose PARENT is Class): set ownerId
-    // on every def in the function's own scope.
-    if (scope.parent !== null) {
-      const parentScope = scopesById.get(scope.parent);
-      if (parentScope !== undefined && parentScope.kind === 'Class') {
-        const classDef = parentScope.ownedDefs.find((d) => d.type === 'Class');
-        if (classDef !== undefined) {
-          for (const def of scope.ownedDefs) {
-            (def as { ownerId?: string }).ownerId = classDef.nodeId;
-          }
-        }
-      }
-    }
-    // Class-body fields (defs structurally owned by the Class scope
-    // itself — class-body annotations like `name: str`): set ownerId
-    // on every def except the class itself.
-    if (scope.kind === 'Class') {
-      const classDef = scope.ownedDefs.find((d) => d.type === 'Class');
-      if (classDef !== undefined) {
-        for (const def of scope.ownedDefs) {
-          if (def === classDef) continue;
-          (def as { ownerId?: string }).ownerId = classDef.nodeId;
-        }
-      }
-    }
-  }
 }
 
 /** Minimal `EmitProvider` carrying only the hooks the receiver-bound

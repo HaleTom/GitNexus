@@ -36,6 +36,7 @@ export {
   findExportedDefByName,
   findOwnedMember,
   findExportedDef,
+  populateClassOwnedMembers,
 } from './scope-walkers.js';
 export { emitFreeCallFallback } from './emit-free-call.js';
 export { emitReceiverBoundCalls } from './emit-receiver-bound.js';
@@ -48,3 +49,4 @@ export { followChainPostFinalize, propagateImportedReturnTypes } from './propaga
 export { collectNamespaceTargets } from './namespace-targets.js';
 export { buildPopulatedMethodDispatch } from './method-dispatch-bridge.js';
 export type { ArityVerdict, EmitProvider, LinearizeStrategy } from './emit-provider.js';
+export { buildMro, defaultLinearize } from './build-mro.js';
