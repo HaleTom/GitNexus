@@ -246,3 +246,10 @@
   function: (attribute
     object: (_) @reference.receiver
     attribute: (identifier) @reference.name)) @reference.call.member
+
+; Attribute write: `obj.name = "x"` — emits ACCESSES (write) edge from
+; the enclosing function to the field on obj's class.
+(assignment
+  left: (attribute
+    object: (_) @reference.receiver
+    attribute: (identifier) @reference.name)) @reference.write.member

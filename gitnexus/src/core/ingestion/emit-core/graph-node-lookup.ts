@@ -44,6 +44,11 @@ export function isLinkableLabel(label: NodeLabel): boolean {
     label === 'Class' ||
     label === 'Interface' ||
     label === 'Struct' ||
-    label === 'Enum'
+    label === 'Enum' ||
+    // Variable / Property are linkable too — receiver-bound write/read
+    // ACCESSES edges target field nodes (e.g. `user.name = "x"` →
+    // ACCESSES edge to User's `name` Variable/Property node).
+    label === 'Variable' ||
+    label === 'Property'
   );
 }

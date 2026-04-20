@@ -533,15 +533,14 @@ function emitReceiverBoundCalls(
             if (memberDef !== undefined) break;
           }
           if (memberDef !== undefined) {
-            const ok = tryEmitEdge(
-              graph,
-              scopes,
-              nodeLookup,
-              site,
-              memberDef,
-              'python-scope: typeref-receiver',
-              seen,
-            );
+            // For read/write ACCESSES, mirror the legacy DAG's reason
+            // convention (just the kind word) so consumers asserting
+            // `reason === 'write'` keep working.
+            const reason =
+              site.kind === 'write' || site.kind === 'read'
+                ? site.kind
+                : 'python-scope: typeref-receiver';
+            const ok = tryEmitEdge(graph, scopes, nodeLookup, site, memberDef, reason, seen);
             if (ok) {
               emitted++;
               handledSites.add(siteKey);
@@ -958,15 +957,30 @@ function populateMethodOwnerIds(parsed: ParsedFile): void {
   for (const scope of parsed.scopes) scopesById.set(scope.id, scope);
 
   for (const scope of parsed.scopes) {
-    if (scope.parent === null) continue;
-    const parentScope = scopesById.get(scope.parent);
-    if (parentScope === undefined || parentScope.kind !== 'Class') continue;
-
-    const classDef = parentScope.ownedDefs.find((d) => d.type === 'Class');
-    if (classDef === undefined) continue;
-
-    for (const def of scope.ownedDefs) {
-      (def as { ownerId?: string }).ownerId = classDef.nodeId;
+    // Methods (Function scopes whose PARENT is Class): set ownerId
+    // on every def in the function's own scope.
+    if (scope.parent !== null) {
+      const parentScope = scopesById.get(scope.parent);
+      if (parentScope !== undefined && parentScope.kind === 'Class') {
+        const classDef = parentScope.ownedDefs.find((d) => d.type === 'Class');
+        if (classDef !== undefined) {
+          for (const def of scope.ownedDefs) {
+            (def as { ownerId?: string }).ownerId = classDef.nodeId;
+          }
+        }
+      }
+    }
+    // Class-body fields (defs structurally owned by the Class scope
+    // itself — class-body annotations like `name: str`): set ownerId
+    // on every def except the class itself.
+    if (scope.kind === 'Class') {
+      const classDef = scope.ownedDefs.find((d) => d.type === 'Class');
+      if (classDef !== undefined) {
+        for (const def of scope.ownedDefs) {
+          if (def === classDef) continue;
+          (def as { ownerId?: string }).ownerId = classDef.nodeId;
+        }
+      }
     }
   }
 }

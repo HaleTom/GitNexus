@@ -235,6 +235,15 @@ export const PYTHON_SCOPE_QUERY = `
   function: (attribute
     object: (_) @reference.receiver
     attribute: (identifier) @reference.name)) @reference.call.member
+
+;; References — attribute writes: \`obj.name = "x"\` emits a write
+;; ACCESSES edge from the enclosing function to the field on obj's
+;; class. The receiver-bound emit pass resolves obj → its class and
+;; \`name\` → the field def via the existing typeref-receiver path.
+(assignment
+  left: (attribute
+    object: (_) @reference.receiver
+    attribute: (identifier) @reference.name)) @reference.write.member
 `;
 
 let _parser: Parser | null = null;
