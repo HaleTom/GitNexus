@@ -17,10 +17,11 @@
  */
 
 import type { Capture, CaptureMatch } from 'gitnexus-shared';
-import { findNodeAtRange, nodeToCapture } from './ast-utils.js';
+import { findNodeAtRange, nodeToCapture, syntheticCapture } from './ast-utils.js';
 import { splitImportStatement } from './import-decomposer.js';
 import { getPythonParser, getPythonScopeQuery } from './query.js';
 import { synthesizeReceiverTypeBinding } from './receiver-binding.js';
+import { computePythonArityMetadata } from './arity-metadata.js';
 
 export function emitPythonScopeCaptures(
   sourceText: string,
@@ -70,6 +71,44 @@ export function emitPythonScopeCaptures(
         const synth = synthesizeReceiverTypeBinding(fnNode);
         if (synth !== null) out.push(synth);
       }
+      continue;
+    }
+
+    if (grouped['@declaration.function'] !== undefined) {
+      // Synthesize arity captures on the declaration match so the
+      // central scope-extractor picks them up alongside @declaration.name.
+      // The anchor range is the function_definition itself — we resolve
+      // the node and pipe it through the arity helper.
+      const anchorCap = grouped['@declaration.function']!;
+      const fnNode = findNodeAtRange(tree.rootNode, anchorCap.range, 'function_definition');
+      if (fnNode !== null) {
+        const arity = computePythonArityMetadata(fnNode);
+        if (arity.parameterCount !== undefined) {
+          grouped['@declaration.parameter-count'] = syntheticCapture(
+            '@declaration.parameter-count',
+            fnNode,
+            String(arity.parameterCount),
+          );
+        }
+        if (arity.requiredParameterCount !== undefined) {
+          grouped['@declaration.required-parameter-count'] = syntheticCapture(
+            '@declaration.required-parameter-count',
+            fnNode,
+            String(arity.requiredParameterCount),
+          );
+        }
+        if (arity.parameterTypes !== undefined) {
+          // Serialize as JSON so the consumer can round-trip without
+          // inventing a quoting convention for type names that may
+          // contain commas (`Dict[str, int]`).
+          grouped['@declaration.parameter-types'] = syntheticCapture(
+            '@declaration.parameter-types',
+            fnNode,
+            JSON.stringify(arity.parameterTypes),
+          );
+        }
+      }
+      out.push(grouped);
       continue;
     }
 

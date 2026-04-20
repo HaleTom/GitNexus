@@ -465,8 +465,20 @@ function pass2AttachDeclarations(
     // populated during Pass 2: those fields are written across passes,
     // so reading them mid-extraction yields a partial view. The
     // `scopeTree` argument is similarly snapshot-before-mutation.
+    //
+    // Auto-hoist for scope-creating declarations: when the declaration's
+    // anchor range is the same node that produced `innermost` (e.g. a
+    // `function_definition` is both `@scope.function` and the
+    // `@declaration.function` anchor), the name is visible OUTSIDE the
+    // body, not inside. Hoisting to the parent scope is what every
+    // mainstream language wants for function/class declarations. Hooks
+    // can override by returning a non-null scope id.
+    const autoHostedId =
+      innermost.parent !== null && rangesEqual(anchor.range, innermost.range)
+        ? innermost.parent
+        : innermost.id;
     const bindingScopeId =
-      provider.bindingScopeFor?.(match, draftToScope(innermost), scopeTree) ?? innermost.id;
+      provider.bindingScopeFor?.(match, draftToScope(innermost), scopeTree) ?? autoHostedId;
     const bindingHost = draftById.get(bindingScopeId) ?? innermost;
 
     const nameKey = deriveDeclarationName(match, def);
@@ -495,12 +507,42 @@ function buildDefFromDeclarationMatch(
   const qualifiedCap = match['@declaration.qualified_name'];
   const qualifiedName = qualifiedCap?.text;
 
+  // Optional arity metadata — producers (e.g. Python emit-captures)
+  // synthesize these on function/method declarations. Their absence is
+  // the normal case for other producers; readers treat undefined as
+  // "unknown" per `SymbolDefinition` contract.
+  const parameterCount = parseIntCapture(match['@declaration.parameter-count']);
+  const requiredParameterCount = parseIntCapture(match['@declaration.required-parameter-count']);
+  const parameterTypes = parseJsonStringArrayCapture(match['@declaration.parameter-types']);
+
   return {
     nodeId: makeDefId(filePath, anchor.range, type, nameCap.text),
     filePath,
     type,
     ...(qualifiedName !== undefined ? { qualifiedName } : { qualifiedName: nameCap.text }),
+    ...(parameterCount !== undefined ? { parameterCount } : {}),
+    ...(requiredParameterCount !== undefined ? { requiredParameterCount } : {}),
+    ...(parameterTypes !== undefined ? { parameterTypes } : {}),
   };
+}
+
+function parseIntCapture(cap: { readonly text: string } | undefined): number | undefined {
+  if (cap === undefined) return undefined;
+  const n = Number.parseInt(cap.text, 10);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function parseJsonStringArrayCapture(
+  cap: { readonly text: string } | undefined,
+): string[] | undefined {
+  if (cap === undefined) return undefined;
+  try {
+    const parsed = JSON.parse(cap.text) as unknown;
+    if (!Array.isArray(parsed)) return undefined;
+    return parsed.every((x): x is string => typeof x === 'string') ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function deriveDeclarationName(match: CaptureMatch, def: SymbolDefinition): string | undefined {
@@ -841,6 +883,15 @@ function extractArity(match: CaptureMatch): number | undefined {
 }
 
 // ─── Internal: range + capture utilities ───────────────────────────────────
+
+function rangesEqual(a: Range, b: Range): boolean {
+  return (
+    a.startLine === b.startLine &&
+    a.startCol === b.startCol &&
+    a.endLine === b.endLine &&
+    a.endCol === b.endCol
+  );
+}
 
 function rangeStrictlyContains(outer: Range, inner: Range): boolean {
   if (
