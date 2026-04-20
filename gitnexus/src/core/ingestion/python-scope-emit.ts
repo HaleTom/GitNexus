@@ -340,28 +340,16 @@ function emitReceiverBoundCalls(
   handledSites: Set<string>,
 ): number {
   let emitted = 0;
-  // Share the same dedup shape as `emitReferencesViaLookup` so we never
-  // double-count a resolution that the shared path already produced.
+  // `seen` is the per-pass dedup so the multiple Cases below don't
+  // double-emit if two of them resolve the same site to the same
+  // target. Pre-seeding from the shared resolver was historically
+  // useful when emit-references ran FIRST, but now the order is
+  // reversed (emit-references comes after this pass and uses
+  // `handledSites` to skip what we processed). Keeping the pre-seed
+  // would suppress legitimate emissions for sites the shared resolver
+  // happened to also resolve.
   const seen = new Set<string>();
-  for (const refs of referenceIndex.bySourceScope.values()) {
-    for (const r of refs) {
-      const targetDef = scopes.defs.get(r.toDef);
-      if (targetDef === undefined) continue;
-      // Seed using the same dedup key as emit-references/emit-edge use.
-      // We recompute by calling the shared helpers indirectly via
-      // tryEmitEdge shape; cheaper to dupe the key construction here
-      // since we need the graph ids anyway.
-      const callerGraphId = resolveCallerGraphId(r.fromScope, scopes, nodeLookup);
-      if (callerGraphId === undefined) continue;
-      const tgtGraphId = resolveDefGraphId(targetDef.filePath, targetDef, nodeLookup);
-      if (tgtGraphId === undefined) continue;
-      const kind = mapReferenceKindToEdgeType(r.kind);
-      if (kind === undefined) continue;
-      seen.add(
-        `${kind}:${callerGraphId}->${tgtGraphId}:${r.atRange.startLine}:${r.atRange.startCol}`,
-      );
-    }
-  }
+  void referenceIndex; // kept in signature for parity with future passes
 
   // Class def → Class scope map (for field-chain field-type lookup).
   // The class scope's `ownedDefs` contains the Class def per pass2's
@@ -857,11 +845,20 @@ function resolveCompoundReceiverClass(
       depth + 1,
     );
     if (objClass === undefined) return undefined;
-    const methodClassScope = classScopeByDefId.get(objClass.nodeId);
-    // Method's return-type binding lives on the class scope (because
-    // the method's function_definition auto-hoists its return-type
-    // binding to the parent scope == class scope).
-    const retType = methodClassScope?.typeBindings.get(methodName);
+    // Walk the MRO so methods inherited from ancestors resolve. A class
+    // owning the method itself doesn't always exist — `class C(B)` may
+    // inherit `greet` from B (or B's parent A), and the return-type
+    // typeBinding lives on the SCOPE OF THE CLASS THAT OWNS THE METHOD.
+    let retType: TypeRef | undefined;
+    const ownerChain = [objClass.nodeId, ...scopes.methodDispatch.mroFor(objClass.nodeId)];
+    for (const ownerId of ownerChain) {
+      const cs = classScopeByDefId.get(ownerId);
+      const candidate = cs?.typeBindings.get(methodName);
+      if (candidate !== undefined) {
+        retType = candidate;
+        break;
+      }
+    }
     if (retType === undefined) return undefined;
     return findClassBindingInScope(retType.declaredAtScope, retType.rawName, scopes);
   }
