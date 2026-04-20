@@ -41,10 +41,11 @@ export function buildMro(
   nodeLookup: GraphNodeLookup,
   linearize: LinearizeStrategy,
 ): Map<string /* DefId */, string[] /* DefId[] */> {
-  // Step 1: parentsByGraphId.
+  // Step 1: parentsByGraphId — typed iterator skips the per-edge type
+  // check and the millions of CALLS/ACCESSES/IMPORTS/DEFINES edges
+  // that aren't relevant to MRO.
   const parentsByGraphId = new Map<string, string[]>();
-  for (const rel of graph.iterRelationships()) {
-    if (rel.type !== 'EXTENDS') continue;
+  for (const rel of graph.iterRelationshipsByType('EXTENDS')) {
     let list = parentsByGraphId.get(rel.sourceId);
     if (list === undefined) {
       list = [];

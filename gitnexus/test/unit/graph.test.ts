@@ -247,4 +247,63 @@ describe('createKnowledgeGraph', () => {
     expect(remaining[0].sourceId).toBe('fn:b');
     expect(remaining[0].targetId).toBe('fn:c');
   });
+
+  // ─── iterRelationshipsByType ───────────────────────────────────────
+
+  describe('iterRelationshipsByType', () => {
+    it('yields only the requested type', () => {
+      const g = createKnowledgeGraph();
+      g.addRelationship(makeRel('fn:a', 'fn:b', 'CALLS'));
+      g.addRelationship(makeRel('fn:b', 'fn:c', 'CALLS'));
+      g.addRelationship(makeRel('cls:X', 'cls:Y', 'EXTENDS'));
+      g.addRelationship(makeRel('cls:Y', 'cls:Z', 'EXTENDS'));
+
+      expect([...g.iterRelationshipsByType('CALLS')]).toHaveLength(2);
+      expect([...g.iterRelationshipsByType('EXTENDS')]).toHaveLength(2);
+    });
+
+    it('returns a fresh empty iterator when the type has no edges', () => {
+      const g = createKnowledgeGraph();
+      g.addRelationship(makeRel('fn:a', 'fn:b', 'CALLS'));
+      // Two consecutive calls must each be exhaustible — guards against
+      // returning a single shared exhausted iterator.
+      expect([...g.iterRelationshipsByType('IMPLEMENTS')]).toHaveLength(0);
+      expect([...g.iterRelationshipsByType('IMPLEMENTS')]).toHaveLength(0);
+    });
+
+    it('reflects removeRelationship on both indexes', () => {
+      const g = createKnowledgeGraph();
+      g.addRelationship(makeRel('cls:X', 'cls:Y', 'EXTENDS'));
+      g.addRelationship(makeRel('cls:Y', 'cls:Z', 'EXTENDS'));
+      expect([...g.iterRelationshipsByType('EXTENDS')]).toHaveLength(2);
+
+      g.removeRelationship('cls:X-EXTENDS-cls:Y');
+      expect([...g.iterRelationshipsByType('EXTENDS')]).toHaveLength(1);
+      expect(g.relationshipCount).toBe(1);
+    });
+
+    it('reflects removeNode on both indexes', () => {
+      const g = createKnowledgeGraph();
+      g.addNode(makeNode('cls:X', 'X', 'src/x.ts'));
+      g.addNode(makeNode('cls:Y', 'Y', 'src/y.ts'));
+      g.addRelationship(makeRel('cls:X', 'cls:Y', 'EXTENDS'));
+      g.addRelationship(makeRel('cls:X', 'cls:Y', 'IMPLEMENTS'));
+      expect([...g.iterRelationshipsByType('EXTENDS')]).toHaveLength(1);
+      expect([...g.iterRelationshipsByType('IMPLEMENTS')]).toHaveLength(1);
+
+      g.removeNode('cls:Y');
+      expect([...g.iterRelationshipsByType('EXTENDS')]).toHaveLength(0);
+      expect([...g.iterRelationshipsByType('IMPLEMENTS')]).toHaveLength(0);
+      expect([...g.iterRelationships()]).toHaveLength(0);
+    });
+
+    it('dedupes by id across both indexes', () => {
+      const g = createKnowledgeGraph();
+      const rel = makeRel('cls:X', 'cls:Y', 'EXTENDS');
+      g.addRelationship(rel);
+      g.addRelationship(rel); // dedup by id
+      expect([...g.iterRelationshipsByType('EXTENDS')]).toHaveLength(1);
+      expect(g.relationshipCount).toBe(1);
+    });
+  });
 });

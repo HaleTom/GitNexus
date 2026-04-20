@@ -23,11 +23,36 @@ import { getPythonParser, getPythonScopeQuery } from './query.js';
 import { synthesizeReceiverTypeBinding } from './receiver-binding.js';
 import { computePythonArityMetadata } from './arity-metadata.js';
 
+// Dev-mode counters for the parse-cache hit-rate. Gated by
+// `PROF_SCOPE_RESOLUTION=1` to keep the hot path branch-free in
+// production. Surfaced via `getPythonCaptureCacheStats()` so
+// benchmarks / debug scripts can verify the cache is being used.
+const PROF = process.env.PROF_SCOPE_RESOLUTION === '1';
+let CACHE_HITS = 0;
+let CACHE_MISSES = 0;
+export function getPythonCaptureCacheStats(): { hits: number; misses: number } {
+  return { hits: CACHE_HITS, misses: CACHE_MISSES };
+}
+export function resetPythonCaptureCacheStats(): void {
+  CACHE_HITS = 0;
+  CACHE_MISSES = 0;
+}
+
 export function emitPythonScopeCaptures(
   sourceText: string,
   _filePath: string,
+  cachedTree?: unknown,
 ): readonly CaptureMatch[] {
-  const tree = getPythonParser().parse(sourceText);
+  // Skip the parse when the caller (parse phase's ASTCache) already
+  // produced a Tree for this source. Cache miss = re-parse, same as
+  // before. The cachedTree parameter is typed as `unknown` at the
+  // contract layer (see `LanguageProvider.emitScopeCaptures`); cast
+  // here at the use site.
+  let tree = cachedTree as ReturnType<ReturnType<typeof getPythonParser>['parse']> | undefined;
+  if (tree === undefined) {
+    tree = getPythonParser().parse(sourceText);
+    if (PROF) CACHE_MISSES++;
+  } else if (PROF) CACHE_HITS++;
   const rawMatches = getPythonScopeQuery().matches(tree.rootNode);
 
   const out: CaptureMatch[] = [];

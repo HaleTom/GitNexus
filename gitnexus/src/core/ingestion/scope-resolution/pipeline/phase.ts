@@ -78,6 +78,14 @@ export const scopeResolutionPhase: PipelinePhase<ScopeResolutionOutput> = {
     deps: ReadonlyMap<string, PhaseResult<unknown>>,
   ): Promise<ScopeResolutionOutput> {
     const { scannedFiles } = getPhaseOutput<StructureOutput>(deps, 'structure');
+    // Reach into the parse phase's AST cache so per-file extract can
+    // skip a second tree-sitter parse. Cache miss is safe (re-parses).
+    // Worker-mode parses leave the cache empty for those files; they
+    // also fall back to a fresh parse — no correctness impact.
+    const { astCache } = getPhaseOutput<{ astCache: { get(path: string): unknown } }>(
+      deps,
+      'parse',
+    );
 
     let totalFiles = 0;
     let totalImports = 0;
@@ -110,6 +118,7 @@ export const scopeResolutionPhase: PipelinePhase<ScopeResolutionOutput> = {
         {
           graph: ctx.graph,
           files,
+          treeCache: astCache,
           onWarn: (msg) => {
             if (isDev) console.warn(`[scope-resolution:${lang}] ${msg}`);
           },

@@ -329,7 +329,21 @@ interface LanguageProviderConfig {
    *
    * Default: undefined (language continues to use legacy DAG).
    */
-  readonly emitScopeCaptures?: (sourceText: string, filePath: string) => readonly CaptureMatch[];
+  readonly emitScopeCaptures?: (
+    sourceText: string,
+    filePath: string,
+    /**
+     * Optional pre-parsed tree-sitter Tree the caller has already
+     * produced (e.g. from the parse phase's AST cache). When supplied,
+     * the provider SHOULD skip its own `parser.parse(sourceText)` and
+     * run its capture query against the supplied tree directly. Typed
+     * as `unknown` here to avoid leaking the tree-sitter dependency
+     * into the provider contract — the provider casts at use site.
+     * Cache miss (parameter omitted or undefined) is always safe and
+     * MUST trigger a fresh parse.
+     */
+    cachedTree?: unknown,
+  ) => readonly CaptureMatch[];
 
   /**
    * Interpret a raw `@import.statement` capture group into a `ParsedImport`.

@@ -42,6 +42,14 @@ export interface RunScopeResolutionInput {
   readonly graph: KnowledgeGraph;
   readonly files: readonly { readonly path: string; readonly content: string }[];
   readonly onWarn?: (message: string) => void;
+  /**
+   * Optional pre-parsed-Tree lookup keyed by file path. When the
+   * pipeline's parse phase ran sequentially, it populated an
+   * `ASTCache`; passing that here lets the per-file extract step
+   * skip a second `tree-sitter parser.parse(...)` call. Cache miss
+   * is safe — falls back to a fresh parse inside the provider.
+   */
+  readonly treeCache?: { get(filePath: string): unknown };
 }
 
 export interface RunScopeResolutionStats {
@@ -65,8 +73,16 @@ export function runScopeResolution(
   // ── Phase 1: extract each file → ParsedFile ────────────────────────────
   const parsedFiles: ParsedFile[] = [];
   let filesSkipped = 0;
+  const treeCache = input.treeCache;
   for (const file of files) {
-    const parsed = extractParsedFile(provider.languageProvider, file.content, file.path, onWarn);
+    const cachedTree = treeCache?.get(file.path);
+    const parsed = extractParsedFile(
+      provider.languageProvider,
+      file.content,
+      file.path,
+      onWarn,
+      cachedTree,
+    );
     if (parsed === undefined) {
       filesSkipped++;
       continue;
