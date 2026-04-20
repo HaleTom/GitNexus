@@ -338,6 +338,18 @@ function emitReceiverBoundCalls(
     }
   }
 
+  // Class def → Class scope map (for field-chain field-type lookup).
+  // The class scope's `ownedDefs` contains the Class def per pass2's
+  // structural-ownership rule.
+  const classScopeByDefId = new Map<string, Scope>();
+  for (const p of parsedFiles) {
+    for (const scope of p.scopes) {
+      if (scope.kind !== 'Class') continue;
+      const cd = scope.ownedDefs.find((d) => d.type === 'Class');
+      if (cd !== undefined) classScopeByDefId.set(cd.nodeId, scope);
+    }
+  }
+
   for (const parsed of parsedFiles) {
     const namespaceTargets = collectNamespaceTargets(parsed, scopes);
 
@@ -347,6 +359,52 @@ function emitReceiverBoundCalls(
 
       const receiverName = site.explicitReceiver.name;
       const memberName = site.name;
+
+      // ── Case 0: dotted receiver (`user.address.save()`) ──────────
+      // Walk the dotted chain via class-scope typeBindings (fields).
+      if (receiverName.includes('.')) {
+        const parts = receiverName.split('.');
+        const head = parts[0]!;
+        const headType = findReceiverTypeBinding(site.inScope, head, scopes);
+        let currentClass: SymbolDefinition | undefined = headType
+          ? findClassBindingInScope(headType.declaredAtScope, headType.rawName, scopes)
+          : undefined;
+        for (let i = 1; i < parts.length && currentClass !== undefined; i++) {
+          const fieldName = parts[i]!;
+          const cs = classScopeByDefId.get(currentClass.nodeId);
+          const fieldType = cs?.typeBindings.get(fieldName);
+          if (fieldType === undefined) {
+            currentClass = undefined;
+            break;
+          }
+          currentClass = findClassBindingInScope(
+            fieldType.declaredAtScope,
+            fieldType.rawName,
+            scopes,
+          );
+        }
+        if (currentClass !== undefined) {
+          const chain = [currentClass.nodeId, ...scopes.methodDispatch.mroFor(currentClass.nodeId)];
+          let memberDef: SymbolDefinition | undefined;
+          for (const ownerId of chain) {
+            memberDef = findOwnedMember(ownerId, memberName, parsedFiles);
+            if (memberDef !== undefined) break;
+          }
+          if (memberDef !== undefined) {
+            const ok = tryEmitEdge(
+              graph,
+              scopes,
+              nodeLookup,
+              site,
+              memberDef,
+              'python-scope: field-chain',
+              seen,
+            );
+            if (ok) emitted++;
+            continue;
+          }
+        }
+      }
 
       // ── Case 1: namespace receiver (`import models; models.X()`) ─
       const targetFile = namespaceTargets.get(receiverName);
