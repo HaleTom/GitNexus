@@ -375,6 +375,33 @@ function emitReceiverBoundCalls(
       const receiverName = site.explicitReceiver.name;
       const memberName = site.name;
 
+      // ── super() — resolve to the enclosing class's PARENT (first MRO entry).
+      // Python's `super()` inside a method dispatches up the MRO chain.
+      if (/^super\s*\(/.test(receiverName)) {
+        const enclosingClass = findEnclosingClassDef(site.inScope, scopes);
+        if (enclosingClass !== undefined) {
+          const ancestors = scopes.methodDispatch.mroFor(enclosingClass.nodeId);
+          let memberDef: SymbolDefinition | undefined;
+          for (const ownerId of ancestors) {
+            memberDef = findOwnedMember(ownerId, memberName, parsedFiles);
+            if (memberDef !== undefined) break;
+          }
+          if (memberDef !== undefined) {
+            const ok = tryEmitEdge(
+              graph,
+              scopes,
+              nodeLookup,
+              site,
+              memberDef,
+              'python-scope: super-receiver',
+              seen,
+            );
+            if (ok) emitted++;
+            continue;
+          }
+        }
+      }
+
       // ── Case 0: compound receiver (`user.address.save()` or
       //   `svc.get_user().save()`) — walk the dotted/call chain,
       //   resolving each segment to a class via field types or
@@ -573,6 +600,29 @@ function emitFreeCallFallback(
     }
   }
   return emitted;
+}
+
+/** Walk a scope chain upward looking for the innermost enclosing
+ *  Class scope and return that class's def. Used by the `super()`
+ *  receiver case to discover the dispatch base. */
+function findEnclosingClassDef(
+  startScope: ScopeId,
+  scopes: ScopeResolutionIndexes,
+): SymbolDefinition | undefined {
+  let currentId: ScopeId | null = startScope;
+  const visited = new Set<ScopeId>();
+  while (currentId !== null) {
+    if (visited.has(currentId)) return undefined;
+    visited.add(currentId);
+    const scope = scopes.scopeTree.getScope(currentId);
+    if (scope === undefined) return undefined;
+    if (scope.kind === 'Class') {
+      const cd = scope.ownedDefs.find((d) => d.type === 'Class');
+      if (cd !== undefined) return cd;
+    }
+    currentId = scope.parent;
+  }
+  return undefined;
 }
 
 /** Max depth for compound-receiver chain resolution (`a().b().c().d()`).
