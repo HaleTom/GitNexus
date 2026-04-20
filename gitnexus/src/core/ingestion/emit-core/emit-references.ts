@@ -25,11 +25,21 @@ import { resolveCallerGraphId, resolveDefGraphId } from './graph-id.js';
 import { mapReferenceKindToEdgeType } from './emit-edge.js';
 import type { GraphNodeLookup } from './graph-node-lookup.js';
 
+/**
+ * Optional opaque skip key — providers may pre-emit edges (e.g. via
+ * receiver-bound post-passes) and want this loop to skip references at
+ * the same source position so the shared resolver's potentially-wrong
+ * fallback resolution doesn't fight the precise emission. The key is
+ * `${filePath}:${startLine}:${startCol}`.
+ */
+export type ReferenceSiteSkipSet = ReadonlySet<string>;
+
 export function emitReferencesViaLookup(
   graph: KnowledgeGraph,
   scopes: ScopeResolutionIndexes,
   referenceIndex: { readonly bySourceScope: ReadonlyMap<ScopeId, readonly Reference[]> },
   nodeLookup: GraphNodeLookup,
+  skipSites?: ReferenceSiteSkipSet,
 ): { emitted: number; skipped: number } {
   let emitted = 0;
   let skipped = 0;
@@ -41,8 +51,18 @@ export function emitReferencesViaLookup(
       skipped += refs.length;
       continue;
     }
+    const fromScopeMeta = scopes.scopeTree.getScope(fromScope);
+    const fromFilePath = fromScopeMeta?.filePath;
 
     for (const ref of refs) {
+      if (skipSites !== undefined && fromFilePath !== undefined) {
+        const siteKey = `${fromFilePath}:${ref.atRange.startLine}:${ref.atRange.startCol}`;
+        if (skipSites.has(siteKey)) {
+          skipped++;
+          continue;
+        }
+      }
+
       const targetDef = scopes.defs.get(ref.toDef);
       if (targetDef === undefined) {
         skipped++;

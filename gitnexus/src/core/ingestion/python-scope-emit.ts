@@ -177,43 +177,42 @@ export function runPythonScopeResolution(
   });
 
   // ── Phase 4: emit graph edges ───────────────────────────────────────────
-  // The shared `emit-references.ts` emits edges between
-  // `SymbolDefinition.nodeId` values, which use the scope-extractor's
-  // `def:<file>#<line>:<col>:<type>:<name>` format. The CLI's existing
-  // graph nodes (created by `parsing-processor.ts`) use the legacy
-  // `<Type>:<file>:<qualifiedName>` ID format. Bridging is required so
-  // edges actually link to existing graph nodes.
-  const { emitted, skipped } = emitReferencesViaLookup(graph, indexes, referenceIndex, nodeLookup);
-
-  // Python-specific post-pass: emit CALLS edges for dotted references
-  // whose receiver is a namespace import (`import models; models.User()`)
-  // or a Class name (`Dog.classify()`). The shared `MethodRegistry.lookup`
-  // only walks `scope.typeBindings` for explicit-receiver resolution — it
-  // does NOT consult `scope.bindings` for namespace/class-kind entries.
-  // Rather than widen the shared contract, this Python-specific pass
-  // closes the gap with a direct receiver → target-module / target-class
-  // walk. Already-emitted edges (via the shared resolver) are deduped by
-  // the same graph-id `(src → tgt @line:col)` key the main path uses.
+  // Order matters: run the Python-specific receiver-bound and free-call
+  // passes FIRST so they record (filePath, line, col) keys for sites
+  // they emit edges for. The shared resolver then skips those sites in
+  // `emitReferencesViaLookup` so its potentially-wrong fallback (e.g.
+  // resolving `app_metrics.get_metrics()` to a same-named local function
+  // instead of the namespace target) doesn't fight the precise emission.
+  const handledSites = new Set<string>();
   const receiverExtras = emitReceiverBoundCalls(
     graph,
     indexes,
     parsedFiles,
     nodeLookup,
     referenceIndex,
+    handledSites,
   );
-
-  // Free-call finalized-binding fallback. The shared `MethodRegistry.lookup`
-  // walks `scope.bindings` for the call's name, but `scope.bindings`
-  // only carries pre-finalize local declarations. Cross-file imports
-  // land in `indexes.bindings` (post-finalize). Without consulting that
-  // second source, every imported `f()` call resolves to "unresolved".
-  // Mirror the dual-source pattern from `findClassBindingInScope`.
   const freeCallExtras = emitFreeCallFallback(
     graph,
     indexes,
     parsedFiles,
     nodeLookup,
     referenceIndex,
+    handledSites,
+  );
+
+  // The shared `emit-references.ts` emits edges between
+  // `SymbolDefinition.nodeId` values, which use the scope-extractor's
+  // `def:<file>#<line>:<col>:<type>:<name>` format. The CLI's existing
+  // graph nodes (created by `parsing-processor.ts`) use the legacy
+  // `<Type>:<file>:<qualifiedName>` ID format. Bridging is required so
+  // edges actually link to existing graph nodes.
+  const { emitted, skipped } = emitReferencesViaLookup(
+    graph,
+    indexes,
+    referenceIndex,
+    nodeLookup,
+    handledSites,
   );
 
   // IMPORTS edges: the scope-resolution path now owns Python file→file
@@ -328,6 +327,7 @@ function emitReceiverBoundCalls(
   parsedFiles: readonly ParsedFile[],
   nodeLookup: GraphNodeLookup,
   referenceIndex: { readonly bySourceScope: ReadonlyMap<ScopeId, readonly Reference[]> },
+  handledSites: Set<string>,
 ): number {
   let emitted = 0;
   // Share the same dedup shape as `emitReferencesViaLookup` so we never
@@ -374,6 +374,7 @@ function emitReceiverBoundCalls(
 
       const receiverName = site.explicitReceiver.name;
       const memberName = site.name;
+      const siteKey = `${parsed.filePath}:${site.atRange.startLine}:${site.atRange.startCol}`;
 
       // ── super() — resolve to the enclosing class's PARENT (first MRO entry).
       // Python's `super()` inside a method dispatches up the MRO chain.
@@ -396,7 +397,10 @@ function emitReceiverBoundCalls(
               'python-scope: super-receiver',
               seen,
             );
-            if (ok) emitted++;
+            if (ok) {
+              emitted++;
+              handledSites.add(siteKey);
+            }
             continue;
           }
         }
@@ -431,7 +435,10 @@ function emitReceiverBoundCalls(
               'python-scope: chain-receiver',
               seen,
             );
-            if (ok) emitted++;
+            if (ok) {
+              emitted++;
+              handledSites.add(siteKey);
+            }
             continue;
           }
         }
@@ -451,7 +458,10 @@ function emitReceiverBoundCalls(
             'python-scope: namespace-receiver',
             seen,
           );
-          if (ok) emitted++;
+          if (ok) {
+            emitted++;
+            handledSites.add(siteKey);
+          }
           continue;
         }
       }
@@ -476,7 +486,10 @@ function emitReceiverBoundCalls(
             'python-scope: class-receiver',
             seen,
           );
-          if (ok) emitted++;
+          if (ok) {
+            emitted++;
+            handledSites.add(siteKey);
+          }
           continue;
         }
       }
@@ -501,7 +514,10 @@ function emitReceiverBoundCalls(
                 'python-scope: dotted-typebinding',
                 seen,
               );
-              if (ok) emitted++;
+              if (ok) {
+                emitted++;
+                handledSites.add(siteKey);
+              }
               continue;
             }
           }
@@ -528,7 +544,10 @@ function emitReceiverBoundCalls(
               'python-scope: typeref-receiver',
               seen,
             );
-            if (ok) emitted++;
+            if (ok) {
+              emitted++;
+              handledSites.add(siteKey);
+            }
           }
         }
       }
@@ -557,6 +576,7 @@ function emitFreeCallFallback(
   parsedFiles: readonly ParsedFile[],
   nodeLookup: GraphNodeLookup,
   referenceIndex: { readonly bySourceScope: ReadonlyMap<ScopeId, readonly Reference[]> },
+  handledSites: Set<string>,
 ): number {
   let emitted = 0;
   const seen = new Set<string>();
@@ -596,7 +616,10 @@ function emitFreeCallFallback(
         'python-scope: free-call-import',
         seen,
       );
-      if (ok) emitted++;
+      if (ok) {
+        emitted++;
+        handledSites.add(`${parsed.filePath}:${site.atRange.startLine}:${site.atRange.startCol}`);
+      }
     }
   }
   return emitted;
