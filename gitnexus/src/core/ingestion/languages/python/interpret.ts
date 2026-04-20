@@ -149,10 +149,22 @@ function stripForwardRefQuotes(text: string): string {
  * resolution time.
  */
 function stripGeneric(text: string): string {
-  const match = text.match(
+  const single = text.match(
     /^(?:[A-Za-z_][A-Za-z0-9_]*\.)?(?:list|List|set|Set|tuple|Tuple|Iterable|Iterator|Sequence|Generator|AsyncIterable|AsyncIterator)\[([^,\]]+)\]$/,
   );
-  return match !== null ? match[1].trim() : text;
+  if (single !== null) return single[1].trim();
+  // dict[K, V] / Dict[K, V] / Mapping[K, V] — strip to value type V.
+  // For-loop destructuring of `for k, v in d.items()` binds `v` to
+  // `d`; the chain-follow then unwraps the dict annotation to V.
+  // Single-key dict `dict[K]` is not legal Python, so two args is the
+  // only shape worth handling. Match a top-level K up to the first
+  // comma and a V to the closing bracket; nested generics in V (e.g.
+  // `dict[str, list[User]]`) are left for a downstream strip pass.
+  const dict = text.match(
+    /^(?:[A-Za-z_][A-Za-z0-9_]*\.)?(?:dict|Dict|Mapping|MutableMapping|OrderedDict|DefaultDict)\[[^,\]]+,\s*([^\]]+)\]$/,
+  );
+  if (dict !== null) return dict[1].trim();
+  return text;
 }
 
 /**

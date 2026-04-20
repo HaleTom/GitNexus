@@ -158,6 +158,28 @@
       (identifier) @type-binding.type))
   (#eq? @_enum "enumerate")) @type-binding.alias
 
+; for k, v in d.items() — bind v to d. The chain-follow unwraps d's
+; dict[K, V] annotation to V via the dict-aware stripGeneric.
+(for_statement
+  left: (pattern_list
+    (identifier)
+    (identifier) @type-binding.name)
+  right: (call
+    function: (attribute
+      object: (identifier) @type-binding.type
+      attribute: (identifier) @_items))
+  (#eq? @_items "items")) @type-binding.alias
+
+(for_statement
+  left: (tuple_pattern
+    (identifier)
+    (identifier) @type-binding.name)
+  right: (call
+    function: (attribute
+      object: (identifier) @type-binding.type
+      attribute: (identifier) @_items))
+  (#eq? @_items "items")) @type-binding.alias
+
 ; ─── Type bindings: function return-type annotations ─────────────────────
 ;
 ; `def get_user() -> User:` — binds the function's NAME to its return
