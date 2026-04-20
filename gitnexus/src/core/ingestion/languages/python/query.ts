@@ -167,6 +167,33 @@ export const PYTHON_SCOPE_QUERY = `
       attribute: (identifier) @_items))
   (#eq? @_items "items")) @type-binding.alias
 
+;; for i, (k, v) in enumerate(d.items()) — nested tuple destructuring.
+;; Bind v (last id of the nested tuple) to d (the dict).
+(for_statement
+  left: (pattern_list
+    (identifier)
+    (tuple_pattern
+      (identifier)
+      (identifier) @type-binding.name))
+  right: (call
+    function: (identifier) @_enum
+    arguments: (argument_list
+      (call
+        function: (attribute
+          object: (identifier) @type-binding.type
+          attribute: (identifier) @_items))))
+  (#eq? @_enum "enumerate")
+  (#eq? @_items "items")) @type-binding.alias
+
+;; for v in d.values() — bind v to d (dict-strip yields value type).
+(for_statement
+  left: (identifier) @type-binding.name
+  right: (call
+    function: (attribute
+      object: (identifier) @type-binding.type
+      attribute: (identifier) @_values))
+  (#eq? @_values "values")) @type-binding.alias
+
 ;; Type bindings (variable annotations: \`u: User\` / \`u: User = x\`)
 (assignment
   left: (identifier) @type-binding.name
