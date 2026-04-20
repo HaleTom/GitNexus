@@ -63,10 +63,7 @@ export function pythonImportOwningScope(
  *
  *  Implemented as an explicit pass-through so reviewers don't have to
  *  re-derive the analysis from absence. */
-export function pythonShouldShadow(
-  _scope: Scope,
-  _bindings: readonly BindingRef[],
-): boolean {
+export function pythonShouldShadow(_scope: Scope, _bindings: readonly BindingRef[]): boolean {
   return true;
 }
 
@@ -77,7 +74,5 @@ export function pythonShouldShadow(
  *  non-Function scopes. */
 export function pythonReceiverBinding(functionScope: Scope): TypeRef | null {
   if (functionScope.kind !== 'Function') return null;
-  return (
-    functionScope.typeBindings.get('self') ?? functionScope.typeBindings.get('cls') ?? null
-  );
+  return functionScope.typeBindings.get('self') ?? functionScope.typeBindings.get('cls') ?? null;
 }

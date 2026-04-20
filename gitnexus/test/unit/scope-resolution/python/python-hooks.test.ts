@@ -69,37 +69,25 @@ describe('pythonArityCompatibility', () => {
 
   it('compatible when argCount sits inside [required, total]', () => {
     expect(
-      pythonArityCompatibility(
-        def({ parameterCount: 3, requiredParameterCount: 1 }),
-        callsite(2),
-      ),
+      pythonArityCompatibility(def({ parameterCount: 3, requiredParameterCount: 1 }), callsite(2)),
     ).toBe('compatible');
   });
 
   it('compatible at the lower bound', () => {
     expect(
-      pythonArityCompatibility(
-        def({ parameterCount: 3, requiredParameterCount: 1 }),
-        callsite(1),
-      ),
+      pythonArityCompatibility(def({ parameterCount: 3, requiredParameterCount: 1 }), callsite(1)),
     ).toBe('compatible');
   });
 
   it('incompatible when argCount is below required', () => {
     expect(
-      pythonArityCompatibility(
-        def({ parameterCount: 3, requiredParameterCount: 2 }),
-        callsite(1),
-      ),
+      pythonArityCompatibility(def({ parameterCount: 3, requiredParameterCount: 2 }), callsite(1)),
     ).toBe('incompatible');
   });
 
   it('incompatible when argCount exceeds total and no varargs are declared', () => {
     expect(
-      pythonArityCompatibility(
-        def({ parameterCount: 2, requiredParameterCount: 0 }),
-        callsite(5),
-      ),
+      pythonArityCompatibility(def({ parameterCount: 2, requiredParameterCount: 0 }), callsite(5)),
     ).toBe('incompatible');
   });
 
@@ -123,10 +111,7 @@ describe('pythonArityCompatibility', () => {
 
   it('"unknown" for negative or non-finite arities (defensive)', () => {
     expect(
-      pythonArityCompatibility(
-        def({ parameterCount: 3, requiredParameterCount: 1 }),
-        callsite(-1),
-      ),
+      pythonArityCompatibility(def({ parameterCount: 3, requiredParameterCount: 1 }), callsite(-1)),
     ).toBe('unknown');
   });
 });
