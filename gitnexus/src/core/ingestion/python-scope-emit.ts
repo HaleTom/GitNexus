@@ -617,19 +617,31 @@ function emitFreeCallFallback(
       const fnDef = findCallableBindingInScope(site.inScope, site.name, scopes);
       if (fnDef === undefined) continue;
 
-      const ok = tryEmitEdge(
-        graph,
-        scopes,
-        nodeLookup,
-        site,
-        fnDef,
-        'python-scope: free-call-import',
-        seen,
-      );
-      if (ok) {
-        emitted++;
-        handledSites.add(`${parsed.filePath}:${site.atRange.startLine}:${site.atRange.startCol}`);
-      }
+      // Free calls collapse to one CALLS edge per (caller, target)
+      // pair. Multiple call sites in the same caller body should not
+      // emit multiple edges (legacy DAG semantics — what
+      // `default-params` / `variadic` / `overload` tests expect).
+      // Member calls keep positional dedup elsewhere.
+      const callerGraphId = resolveCallerGraphId(site.inScope, scopes, nodeLookup);
+      if (callerGraphId === undefined) continue;
+      const tgtGraphId = resolveDefGraphId(fnDef.filePath, fnDef, nodeLookup);
+      if (tgtGraphId === undefined) continue;
+      // Always mark the site as handled — even when the dedup-collapse
+      // means we don't add a new edge — so `emit-references` skips its
+      // potentially-wrong fallback for the same site.
+      handledSites.add(`${parsed.filePath}:${site.atRange.startLine}:${site.atRange.startCol}`);
+      const relId = `rel:CALLS:${callerGraphId}->${tgtGraphId}`;
+      if (seen.has(relId)) continue;
+      seen.add(relId);
+      graph.addRelationship({
+        id: relId,
+        sourceId: callerGraphId,
+        targetId: tgtGraphId,
+        type: 'CALLS',
+        confidence: 0.85,
+        reason: 'python-scope: free-call-import',
+      });
+      emitted++;
     }
   }
   return emitted;
