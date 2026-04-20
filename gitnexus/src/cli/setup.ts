@@ -13,7 +13,7 @@ import { execFile, execFileSync } from 'child_process';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
 import { glob } from 'glob';
-import { parseTree, modify, applyEdits } from 'jsonc-parser';
+import { parseTree, modify, applyEdits, ParseError } from 'jsonc-parser';
 import { getGlobalDir } from '../storage/repo-manager.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -130,7 +130,7 @@ async function writeJsonFile(filePath: string, data: any): Promise<void> {
 
 /**
  * Merge a key/value pair into a JSONC config file, preserving comments and formatting.
- * Falls back to readJsonFile + writeJsonFile for non-JSONC files that are valid JSON.
+ * Falls back to JSON.parse + writeJsonFile for valid JSON that is not valid JSONC.
  * If the file is genuinely corrupt (not valid JSON or JSONC), leaves it untouched.
  */
 async function mergeJsoncFile(
@@ -160,12 +160,15 @@ async function mergeJsoncFile(
     return true;
   }
 
-  const tree = parseTree(raw);
+  const parseErrors: ParseError[] = [];
+  const tree = parseTree(raw, parseErrors);
 
-  if (tree && tree.type === 'object' && (!(tree as any).errors || (tree as any).errors.length === 0)) {
-    const edits = modify(raw, keyPath, value, {
-      formattingOptions: { tabSize: 2, insertSpaces: true },
-    });
+  if (tree && tree.type === 'object' && parseErrors.length === 0) {
+    const detectedTabs = /^\t/m.test(raw);
+    const formattingOptions = detectedTabs
+      ? { tabSize: 1, insertSpaces: false }
+      : { tabSize: 2, insertSpaces: true };
+    const edits = modify(raw, keyPath, value, { formattingOptions });
     const result = applyEdits(raw, edits);
     await fs.writeFile(filePath, result, 'utf-8');
     return true;

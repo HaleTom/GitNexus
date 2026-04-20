@@ -209,7 +209,8 @@ describe('setupOpenCode — JSONC preservation', () => {
     await setupCommand();
 
     const raw = await fs.readFile(opencodeJsonPath(), 'utf-8');
-    expect(raw).toContain('test');
+    expect(raw).toBe(corrupt);
+    expect(raw).not.toContain('gitnexus');
   });
 
   it('uses npx fallback format when gitnexus binary is not on PATH', async () => {
