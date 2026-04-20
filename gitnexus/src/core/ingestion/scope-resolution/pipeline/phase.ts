@@ -16,8 +16,8 @@
  * primary, so we don't double-emit edges from both code paths.
  *
  * Adding a language is two changes:
- *   - Implement `ScopeResolver` in `languages/<lang>/emit/index.ts`
- *     and register it in `emit-providers-registry.ts`.
+ *   - Implement `ScopeResolver` in `languages/<lang>/scope-resolver.ts`
+ *     and register it in `scope-resolution/pipeline/registry.ts`.
  *   - Add the language to `MIGRATED_LANGUAGES` in
  *     `registry-primary-flag.ts`.
  *
@@ -129,7 +129,7 @@ export const scopeResolutionPhase: PipelinePhase<ScopeResolutionOutput> = {
 
       if (isDev) {
         console.log(
-          `🐍 scope-resolution:${lang}: ${stats.filesProcessed} files → ${stats.importsEmitted} IMPORTS + ${stats.referenceEdgesEmitted} reference edges (${stats.resolve.unresolved} unresolved sites, ${stats.referenceSkipped} skipped)`,
+          `[scope-resolution:${lang}] ${stats.filesProcessed} files → ${stats.importsEmitted} IMPORTS + ${stats.referenceEdgesEmitted} reference edges (${stats.resolve.unresolved} unresolved sites, ${stats.referenceSkipped} skipped)`,
         );
       }
     }
