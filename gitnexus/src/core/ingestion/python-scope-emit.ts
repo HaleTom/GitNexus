@@ -522,6 +522,51 @@ function emitReceiverBoundCalls(
         }
       }
 
+      // ── Case 3b: receiver's typeBinding is a method-call chain
+      // (`city → user.get_city`). The constructor-inferred capture for
+      // `city = user.get_city()` stores the attribute text without
+      // parens. Treat as a call-shape and run through the compound
+      // resolver, which now also field-walks when the method isn't
+      // owned by the receiver's class.
+      if (
+        typeRef !== undefined &&
+        typeRef.rawName.includes('.') &&
+        !typeRef.rawName.includes('(') &&
+        !namespaceTargets.has(typeRef.rawName.split('.')[0]!)
+      ) {
+        const ownerDef = resolveCompoundReceiverClass(
+          typeRef.rawName + '()',
+          typeRef.declaredAtScope,
+          scopes,
+          parsedFiles,
+          classScopeByDefId,
+        );
+        if (ownerDef !== undefined) {
+          const chain = [ownerDef.nodeId, ...scopes.methodDispatch.mroFor(ownerDef.nodeId)];
+          let memberDef: SymbolDefinition | undefined;
+          for (const ownerId of chain) {
+            memberDef = findOwnedMember(ownerId, memberName, parsedFiles);
+            if (memberDef !== undefined) break;
+          }
+          if (memberDef !== undefined) {
+            const ok = tryEmitEdge(
+              graph,
+              scopes,
+              nodeLookup,
+              site,
+              memberDef,
+              'python-scope: chain-typebinding',
+              seen,
+            );
+            if (ok) {
+              emitted++;
+              handledSites.add(siteKey);
+            }
+            continue;
+          }
+        }
+      }
+
       // ── Case 4: simple typeBinding (`u: U` where U is aliased import)
       if (typeRef !== undefined && !typeRef.rawName.includes('.')) {
         const ownerDef = findClassBindingInScope(site.inScope, typeRef.rawName, scopes);
@@ -856,6 +901,30 @@ function resolveCompoundReceiverClass(
       if (candidate !== undefined) {
         retType = candidate;
         break;
+      }
+    }
+    // Field-fallback: if the receiver class has no `methodName` itself,
+    // walk its fields and try the same lookup on each field's type.
+    // Matches the "unified fixpoint" behavior tested by the
+    // method-chain fixture where `user.get_city()` reaches
+    // `Address.get_city` through User's `address: Address` field.
+    if (retType === undefined) {
+      const objCs = classScopeByDefId.get(objClass.nodeId);
+      if (objCs !== undefined) {
+        for (const [, fieldType] of objCs.typeBindings) {
+          const fieldClass = findClassBindingInScope(
+            fieldType.declaredAtScope,
+            fieldType.rawName,
+            scopes,
+          );
+          if (fieldClass === undefined) continue;
+          const fcs = classScopeByDefId.get(fieldClass.nodeId);
+          const candidate = fcs?.typeBindings.get(methodName);
+          if (candidate !== undefined) {
+            retType = candidate;
+            break;
+          }
+        }
       }
     }
     if (retType === undefined) return undefined;
