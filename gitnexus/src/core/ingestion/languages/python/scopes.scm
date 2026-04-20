@@ -134,6 +134,30 @@
   right: (call
     function: (identifier) @type-binding.type)) @type-binding.alias
 
+; for (i, u) in enumerate(X) and for i, u in enumerate(X) — bind the
+; second tuple element to X. enumerate yields (int, X-element); the
+; chain-follow unwraps X via generic-strip when X is an annotated
+; collection.
+(for_statement
+  left: (tuple_pattern
+    (identifier)
+    (identifier) @type-binding.name)
+  right: (call
+    function: (identifier) @_enum
+    arguments: (argument_list
+      (identifier) @type-binding.type))
+  (#eq? @_enum "enumerate")) @type-binding.alias
+
+(for_statement
+  left: (pattern_list
+    (identifier)
+    (identifier) @type-binding.name)
+  right: (call
+    function: (identifier) @_enum
+    arguments: (argument_list
+      (identifier) @type-binding.type))
+  (#eq? @_enum "enumerate")) @type-binding.alias
+
 ; ─── Type bindings: function return-type annotations ─────────────────────
 ;
 ; `def get_user() -> User:` — binds the function's NAME to its return

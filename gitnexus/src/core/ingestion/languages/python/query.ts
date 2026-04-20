@@ -119,6 +119,31 @@ export const PYTHON_SCOPE_QUERY = `
   right: (call
     function: (identifier) @type-binding.type)) @type-binding.alias
 
+;; for (i, u) in enumerate(X) — paren-tuple, bind last element to X's
+;; element type. \`enumerate(X)\` yields (int, X-element); the second
+;; pattern var takes X (which the chain-follow then unwraps to its
+;; element type via generic-strip in interpret.ts).
+(for_statement
+  left: (tuple_pattern
+    (identifier)
+    (identifier) @type-binding.name)
+  right: (call
+    function: (identifier) @_enum
+    arguments: (argument_list
+      (identifier) @type-binding.type))
+  (#eq? @_enum "enumerate")) @type-binding.alias
+
+;; for i, u in enumerate(X) — pattern_list (no parens) variant.
+(for_statement
+  left: (pattern_list
+    (identifier)
+    (identifier) @type-binding.name)
+  right: (call
+    function: (identifier) @_enum
+    arguments: (argument_list
+      (identifier) @type-binding.type))
+  (#eq? @_enum "enumerate")) @type-binding.alias
+
 ;; Type bindings (variable annotations: \`u: User\` / \`u: User = x\`)
 (assignment
   left: (identifier) @type-binding.name
