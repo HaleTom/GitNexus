@@ -138,6 +138,83 @@ export function findCallableBindingInScope(
 }
 
 /**
+ * Walk a scope chain upward looking for the innermost enclosing
+ * Class scope and return that class's def. Used by per-language
+ * `super` receiver branches to discover the dispatch base.
+ */
+export function findEnclosingClassDef(
+  startScope: ScopeId,
+  scopes: ScopeResolutionIndexes,
+): SymbolDefinition | undefined {
+  let currentId: ScopeId | null = startScope;
+  const visited = new Set<ScopeId>();
+  while (currentId !== null) {
+    if (visited.has(currentId)) return undefined;
+    visited.add(currentId);
+    const scope = scopes.scopeTree.getScope(currentId);
+    if (scope === undefined) return undefined;
+    if (scope.kind === 'Class') {
+      const cd = scope.ownedDefs.find((d) => d.type === 'Class');
+      if (cd !== undefined) return cd;
+    }
+    currentId = scope.parent;
+  }
+  return undefined;
+}
+
+/**
+ * Find a free-function def by simple name across all parsed files,
+ * preferring scope-chain-visible bindings (import + finalized scope
+ * bindings) before falling back to a workspace-wide simple-name scan.
+ *
+ * The fallback scan is intentionally loose so per-language compound
+ * resolvers can find a callable target even when the binding chain
+ * doesn't surface it (e.g. cross-package re-exports the finalize
+ * pass missed). Strictly-typed languages may want to disable the
+ * fallback by simply not calling this helper from their compound
+ * resolver.
+ */
+export function findExportedDefByName(
+  name: string,
+  inScope: ScopeId,
+  scopes: ScopeResolutionIndexes,
+  parsedFiles: readonly ParsedFile[],
+): SymbolDefinition | undefined {
+  let currentId: ScopeId | null = inScope;
+  const visited = new Set<ScopeId>();
+  while (currentId !== null) {
+    if (visited.has(currentId)) break;
+    visited.add(currentId);
+    const scope = scopes.scopeTree.getScope(currentId);
+    if (scope === undefined) break;
+    const local = scope.bindings.get(name);
+    if (local !== undefined) {
+      for (const b of local) {
+        if (b.def.type === 'Function' || b.def.type === 'Method') return b.def;
+      }
+    }
+    const finalized = scopes.bindings.get(currentId)?.get(name);
+    if (finalized !== undefined) {
+      for (const b of finalized) {
+        if (b.def.type === 'Function' || b.def.type === 'Method') return b.def;
+      }
+    }
+    currentId = scope.parent;
+  }
+  // Fallback: scan parsed files for any matching simple-name def.
+  for (const f of parsedFiles) {
+    for (const def of f.localDefs) {
+      if (def.type !== 'Function' && def.type !== 'Method') continue;
+      const qn = def.qualifiedName;
+      if (qn === undefined) continue;
+      const simple = qn.lastIndexOf('.') === -1 ? qn : qn.slice(qn.lastIndexOf('.') + 1);
+      if (simple === name) return def;
+    }
+  }
+  return undefined;
+}
+
+/**
  * Find a member of a class by simple name — a def whose `ownerId`
  * matches the class's nodeId and whose simple name matches `memberName`.
  */

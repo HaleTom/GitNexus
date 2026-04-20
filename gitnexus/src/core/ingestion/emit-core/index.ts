@@ -32,8 +32,13 @@ export {
   findReceiverTypeBinding,
   findClassBindingInScope,
   findCallableBindingInScope,
+  findEnclosingClassDef,
+  findExportedDefByName,
   findOwnedMember,
   findExportedDef,
 } from './scope-walkers.js';
+export { emitFreeCallFallback } from './emit-free-call.js';
+export { followChainPostFinalize, propagateImportedReturnTypes } from './propagate-return-types.js';
 export { collectNamespaceTargets } from './namespace-targets.js';
 export { buildPopulatedMethodDispatch } from './method-dispatch-bridge.js';
+export type { ArityVerdict, EmitProvider, LinearizeStrategy } from './emit-provider.js';

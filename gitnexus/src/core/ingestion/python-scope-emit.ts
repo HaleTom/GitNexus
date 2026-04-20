@@ -52,15 +52,16 @@ import {
   buildGraphNodeLookup,
   buildPopulatedMethodDispatch,
   collectNamespaceTargets,
+  emitFreeCallFallback,
   emitImportEdges,
   emitReferencesViaLookup,
-  findCallableBindingInScope,
   findClassBindingInScope,
+  findEnclosingClassDef,
   findExportedDef,
+  findExportedDefByName,
   findOwnedMember,
   findReceiverTypeBinding,
-  mapReferenceKindToEdgeType,
-  resolveCallerGraphId,
+  propagateImportedReturnTypes,
   resolveDefGraphId,
   tryEmitEdge,
   type GraphNodeLookup,
@@ -599,222 +600,6 @@ function emitReceiverBoundCalls(
   return emitted;
 }
 
-/**
- * Emit CALLS edges for free-call reference sites whose target is
- * imported (or otherwise visible only via post-finalize scope.bindings).
- *
- * The shared `MethodRegistry.lookup` only consults `scope.bindings`
- * (pre-finalize / local-only) for free calls. Cross-file imports land
- * in `indexes.bindings` (post-finalize). Without this fallback, every
- * `from x import f; f()` resolves to "unresolved".
- *
- * Same dual-source pattern as `findClassBindingInScope` — but accepts
- * Function/Method/Constructor instead of Class. Pre-seeds `seen` from
- * the shared resolver's emissions so we don't double-emit.
- */
-function emitFreeCallFallback(
-  graph: KnowledgeGraph,
-  scopes: ScopeResolutionIndexes,
-  parsedFiles: readonly ParsedFile[],
-  nodeLookup: GraphNodeLookup,
-  referenceIndex: { readonly bySourceScope: ReadonlyMap<ScopeId, readonly Reference[]> },
-  handledSites: Set<string>,
-): number {
-  let emitted = 0;
-  const seen = new Set<string>();
-  // Pre-seed `seen` with whatever the shared resolver + receiver-bound
-  // pass already emitted so we never double-count an edge that another
-  // path produced.
-  for (const refs of referenceIndex.bySourceScope.values()) {
-    for (const r of refs) {
-      const targetDef = scopes.defs.get(r.toDef);
-      if (targetDef === undefined) continue;
-      const callerGraphId = resolveCallerGraphId(r.fromScope, scopes, nodeLookup);
-      if (callerGraphId === undefined) continue;
-      const tgtGraphId = resolveDefGraphId(targetDef.filePath, targetDef, nodeLookup);
-      if (tgtGraphId === undefined) continue;
-      const kind = mapReferenceKindToEdgeType(r.kind);
-      if (kind === undefined) continue;
-      seen.add(
-        `${kind}:${callerGraphId}->${tgtGraphId}:${r.atRange.startLine}:${r.atRange.startCol}`,
-      );
-    }
-  }
-
-  for (const parsed of parsedFiles) {
-    for (const site of parsed.referenceSites) {
-      if (site.kind !== 'call') continue;
-      if (site.explicitReceiver !== undefined) continue;
-
-      const fnDef = findCallableBindingInScope(site.inScope, site.name, scopes);
-      if (fnDef === undefined) continue;
-
-      // Free calls collapse to one CALLS edge per (caller, target)
-      // pair. Multiple call sites in the same caller body should not
-      // emit multiple edges (legacy DAG semantics — what
-      // `default-params` / `variadic` / `overload` tests expect).
-      // Member calls keep positional dedup elsewhere.
-      const callerGraphId = resolveCallerGraphId(site.inScope, scopes, nodeLookup);
-      if (callerGraphId === undefined) continue;
-      const tgtGraphId = resolveDefGraphId(fnDef.filePath, fnDef, nodeLookup);
-      if (tgtGraphId === undefined) continue;
-      // Always mark the site as handled — even when the dedup-collapse
-      // means we don't add a new edge — so `emit-references` skips its
-      // potentially-wrong fallback for the same site.
-      handledSites.add(`${parsed.filePath}:${site.atRange.startLine}:${site.atRange.startCol}`);
-      const relId = `rel:CALLS:${callerGraphId}->${tgtGraphId}`;
-      if (seen.has(relId)) continue;
-      seen.add(relId);
-      graph.addRelationship({
-        id: relId,
-        sourceId: callerGraphId,
-        targetId: tgtGraphId,
-        type: 'CALLS',
-        confidence: 0.85,
-        // Match legacy DAG's reason convention so consumers that
-        // assert `reason === 'import-resolved'` keep working.
-        reason: fnDef.filePath !== parsed.filePath ? 'import-resolved' : 'local-call',
-      });
-      emitted++;
-    }
-  }
-  return emitted;
-}
-
-/** Max chain depth for the post-finalize re-follow. */
-const RECHAIN_MAX_DEPTH = 8;
-
-/** Walk `ref.rawName` through the scope chain's typeBindings looking
- *  for a terminal class-like rawName. Mirrors the in-extractor
- *  `followChainedRef` but operates on post-finalize Scope objects so
- *  it can see imported return-types propagated by
- *  `propagateImportedReturnTypes`. */
-function followChainPostFinalize(
-  start: TypeRef,
-  fromScopeId: ScopeId,
-  scopes: ScopeResolutionIndexes,
-): TypeRef {
-  let current = start;
-  const visited = new Set<string>();
-  for (let depth = 0; depth < RECHAIN_MAX_DEPTH; depth++) {
-    if (current.rawName.includes('.')) return current;
-    let scopeId: ScopeId | null = fromScopeId;
-    let next: TypeRef | undefined;
-    while (scopeId !== null) {
-      const scope = scopes.scopeTree.getScope(scopeId);
-      if (scope === undefined) break;
-      next = scope.typeBindings.get(current.rawName);
-      if (next !== undefined && next !== current) break;
-      next = undefined;
-      scopeId = scope.parent;
-    }
-    if (next === undefined) return current;
-    if (visited.has(next.rawName)) return current;
-    visited.add(next.rawName);
-    current = next;
-  }
-  return current;
-}
-
-/**
- * Copy return-type typeBindings across module boundaries via import
- * bindings. For each module-scope import like `from x import f`, look
- * up `f` in the source file's module-scope typeBindings (which carries
- * `f → ReturnType` from the `@type-binding.return` capture) and mirror
- * that binding into the importer's module scope. Enables
- * `u = f(); u.save()` to chain through `f`'s return-type even when
- * `f` lives in another file.
- *
- * After propagation, re-runs the chain-follow on every scope's
- * typeBindings — pass-4 ran before propagation and missed any chain
- * whose terminal lived in a foreign file.
- *
- * Mutates `Scope.typeBindings` (a plain Map per `draftToScope`).
- */
-function propagateImportedReturnTypes(
-  parsedFiles: readonly ParsedFile[],
-  indexes: ScopeResolutionIndexes,
-): void {
-  // Index module scopes by filePath for fast cross-file lookup.
-  const moduleScopeByFile = new Map<string, Scope>();
-  for (const parsed of parsedFiles) {
-    const moduleScope = parsed.scopes.find((s) => s.kind === 'Module');
-    if (moduleScope !== undefined) moduleScopeByFile.set(parsed.filePath, moduleScope);
-  }
-
-  for (const parsed of parsedFiles) {
-    const importerModule = moduleScopeByFile.get(parsed.filePath);
-    if (importerModule === undefined) continue;
-    const finalizedBindings = indexes.bindings.get(importerModule.id);
-    if (finalizedBindings === undefined) continue;
-
-    for (const [localName, refs] of finalizedBindings) {
-      // Skip if importer already has a typeBinding for this name (e.g.
-      // an explicit local annotation should win over import-derived).
-      if (importerModule.typeBindings.has(localName)) continue;
-
-      for (const ref of refs) {
-        if (ref.origin !== 'import' && ref.origin !== 'reexport') continue;
-        const sourceModule = moduleScopeByFile.get(ref.def.filePath);
-        if (sourceModule === undefined) continue;
-
-        // The source file's typeBinding is keyed by the def's simple
-        // name (e.g. `get_user`), not the importer's local alias. Use
-        // the def's qualifiedName tail.
-        const qn = ref.def.qualifiedName;
-        if (qn === undefined) continue;
-        const dot = qn.lastIndexOf('.');
-        const sourceName = dot === -1 ? qn : qn.slice(dot + 1);
-
-        const sourceTypeRef = sourceModule.typeBindings.get(sourceName);
-        if (sourceTypeRef === undefined) continue;
-
-        // Mirror the binding under the importer's local alias —
-        // mutating typeBindings is safe because draftToScope produced
-        // a non-frozen Map.
-        (importerModule.typeBindings as Map<string, TypeRef>).set(localName, sourceTypeRef);
-        break;
-      }
-    }
-  }
-
-  // Re-follow chains across every scope so chains terminating in a
-  // freshly-propagated import binding resolve to their terminal type.
-  for (const parsed of parsedFiles) {
-    for (const scope of parsed.scopes) {
-      for (const [name, ref] of scope.typeBindings) {
-        const resolved = followChainPostFinalize(ref, scope.id, indexes);
-        if (resolved !== ref) {
-          (scope.typeBindings as Map<string, TypeRef>).set(name, resolved);
-        }
-      }
-    }
-  }
-}
-
-/** Walk a scope chain upward looking for the innermost enclosing
- *  Class scope and return that class's def. Used by the `super()`
- *  receiver case to discover the dispatch base. */
-function findEnclosingClassDef(
-  startScope: ScopeId,
-  scopes: ScopeResolutionIndexes,
-): SymbolDefinition | undefined {
-  let currentId: ScopeId | null = startScope;
-  const visited = new Set<ScopeId>();
-  while (currentId !== null) {
-    if (visited.has(currentId)) return undefined;
-    visited.add(currentId);
-    const scope = scopes.scopeTree.getScope(currentId);
-    if (scope === undefined) return undefined;
-    if (scope.kind === 'Class') {
-      const cd = scope.ownedDefs.find((d) => d.type === 'Class');
-      if (cd !== undefined) return cd;
-    }
-    currentId = scope.parent;
-  }
-  return undefined;
-}
-
 /** Max depth for compound-receiver chain resolution (`a().b().c().d()`).
  *  Practical Python rarely exceeds 3-4 hops; the cap just prevents
  *  pathological recursion if the receiver text turns out to be malformed. */
@@ -962,50 +747,6 @@ function matchingOpenParen(text: string): number {
     }
   }
   return -1;
-}
-
-/** Look up a free-function def by simple name across all parsed files
- *  whose scope chain from `inScope` includes the binding. Used by the
- *  free-call branch of `resolveCompoundReceiverClass`. */
-function findExportedDefByName(
-  name: string,
-  inScope: ScopeId,
-  scopes: ScopeResolutionIndexes,
-  parsedFiles: readonly ParsedFile[],
-): SymbolDefinition | undefined {
-  // Walk the call site's scope chain looking for a binding.
-  let currentId: ScopeId | null = inScope;
-  const visited = new Set<ScopeId>();
-  while (currentId !== null) {
-    if (visited.has(currentId)) break;
-    visited.add(currentId);
-    const scope = scopes.scopeTree.getScope(currentId);
-    if (scope === undefined) break;
-    const local = scope.bindings.get(name);
-    if (local !== undefined) {
-      for (const b of local) {
-        if (b.def.type === 'Function' || b.def.type === 'Method') return b.def;
-      }
-    }
-    const finalized = scopes.bindings.get(currentId)?.get(name);
-    if (finalized !== undefined) {
-      for (const b of finalized) {
-        if (b.def.type === 'Function' || b.def.type === 'Method') return b.def;
-      }
-    }
-    currentId = scope.parent;
-  }
-  // Fallback: scan parsed files for any matching simple-name def.
-  for (const f of parsedFiles) {
-    for (const def of f.localDefs) {
-      if (def.type !== 'Function' && def.type !== 'Method') continue;
-      const qn = def.qualifiedName;
-      if (qn === undefined) continue;
-      const simple = qn.lastIndexOf('.') === -1 ? qn : qn.slice(qn.lastIndexOf('.') + 1);
-      if (simple === name) return def;
-    }
-  }
-  return undefined;
 }
 
 /**
