@@ -2,31 +2,72 @@
  * `EmitProvider` — the per-language contract consumed by the generic
  * scope-resolution orchestrator (`runScopeResolution`).
  *
- * **Two distinct provider contracts:** the codebase has both
- * `LanguageProvider` (in `language-provider.ts`) and this `EmitProvider`.
- * Their lifecycles differ:
+ * ## Migration cookbook (next language)
  *
- *   - `LanguageProvider` is the **parsing-side** contract — how to emit
- *     captures, classify scopes, interpret imports / typeBindings. ~40
- *     fields covering both legacy and new pipelines. Consumed by
- *     `ScopeExtractor`.
- *   - `EmitProvider` is the **emit-side** contract — how the resolution
- *     pipeline dispatches references to graph edges. 6 required + 2
- *     optional fields. Consumed by `runScopeResolution`.
+ * To add a language to the registry-primary path:
+ *
+ *   1. Implement `EmitProvider` in
+ *      `gitnexus/src/core/ingestion/languages/<lang>/emit/index.ts`.
+ *      Six required fields (language, languageProvider,
+ *      importEdgeReason, resolveImportTarget, mergeBindings,
+ *      arityCompatibility, buildMro, populateOwners, isSuperReceiver)
+ *      plus two optional booleans (propagatesReturnTypesAcrossImports,
+ *      fieldFallbackOnMethodLookup).
+ *   2. Export a thin entry point:
+ *      `runYourLangScopeResolution(input) = runScopeResolution(input, yourEmitProvider)`.
+ *   3. Register the provider in
+ *      `gitnexus/src/core/ingestion/emit-providers-registry.ts`.
+ *   4. Add `SupportedLanguages.YourLang` to `MIGRATED_LANGUAGES` in
+ *      `registry-primary-flag.ts`.
+ *   5. Verify the resolver integration test at
+ *      `gitnexus/test/integration/resolvers/<lang>.test.ts` passes
+ *      under both `REGISTRY_PRIMARY_<LANG>=0` (legacy) and `=1`
+ *      (registry-primary). The CI parity gate enforces this.
+ *
+ * No new pipeline phase, no orchestrator copy-paste, no workflow
+ * change. The generic `scopeResolutionPhase` and the CI parity
+ * workflow auto-discover everything via `MIGRATED_LANGUAGES`.
+ *
+ * ## EmitProvider vs LanguageProvider
+ *
+ * The codebase has two provider contracts. Their lifecycles differ:
+ *
+ *   - `LanguageProvider` (`language-provider.ts`) is the
+ *     **parsing-side** contract — how to emit captures, classify
+ *     scopes, interpret imports / typeBindings. ~40 fields covering
+ *     both legacy and new pipelines. Consumed by `ScopeExtractor`,
+ *     once per file at extract time.
+ *   - `EmitProvider` (this file) is the **emit-side** contract — how
+ *     the resolution pipeline dispatches references to graph edges.
+ *     8 fields total. Consumed by `runScopeResolution`, once per
+ *     workspace at resolve time.
  *
  * They share three concept names (`arityCompatibility`, `mergeBindings`,
  * `resolveImportTarget`) because the emit pipeline reuses a few
  * finalize hooks. Per-language wiring passes the SAME function
- * reference through both interfaces — there is no second copy of the
- * logic. Rationale for not collapsing them: lifecycles differ
- * (parsing-side runs once per file at extract time, emit-side runs
- * once per workspace at resolve time), and merging would create a
- * god-interface that complicates future migrations.
+ * reference through both interfaces — no second copy of the logic.
+ * Rationale for not collapsing: lifecycle separation, and merging
+ * would create a god-interface complicating future migrations.
  *
- * **Reference implementation:** `languages/python/emit/index.ts` —
+ * ## Reference implementation
+ *
+ * `gitnexus/src/core/ingestion/languages/python/emit/index.ts` —
  * `pythonEmitProvider` is the canonical example. Read that file when
- * migrating a new language; this interface lists the 6 fields that
+ * migrating a new language; this interface lists the fields that
  * implementation populates.
+ *
+ * ## Contract Invariants the orchestrator depends on
+ *
+ * (See the plan for the full list. Highlights only here.)
+ *
+ *   - **I1 — Phase 4 emission order is load-bearing.** Receiver-bound
+ *     pass FIRST, then free-call fallback, then `emitReferencesViaLookup`.
+ *   - **I3 — `propagateImportedReturnTypes` runs after finalize and
+ *     before `resolveReferenceSites`.** It mutates non-frozen
+ *     `Scope.typeBindings`. Do not freeze typeBindings in any
+ *     downstream refactor.
+ *   - **I5 — Pre-seeding `seen` from `referenceIndex` is forbidden.**
+ *     The receiver-bound pass relies on this never happening.
  *
  * Plan: `docs/plans/2026-04-20-001-refactor-emit-pipeline-generalization-plan.md`.
  */
