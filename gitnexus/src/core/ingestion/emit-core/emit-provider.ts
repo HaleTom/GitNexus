@@ -42,6 +42,7 @@ import type {
 } from 'gitnexus-shared';
 import type { KnowledgeGraph } from '../../graph/types.js';
 import type { GraphNodeLookup } from './graph-node-lookup.js';
+import { LanguageProvider } from '../language-provider.js';
 
 /** A LinearizeStrategy receives the full ancestor map so C3-style
  *  algorithms (which need to merge each parent's MRO) can implement
@@ -60,6 +61,16 @@ export interface EmitProvider {
   /** Identity for telemetry + per-language flag check. */
   readonly language: SupportedLanguages;
 
+  /** Parsing-side hook bag consumed by `extractParsedFile`. The
+   *  same `LanguageProvider` reference flows through both interfaces
+   *  to keep parsing and emit semantics in sync. */
+  readonly languageProvider: LanguageProvider;
+
+  /** Reason text on emitted IMPORTS edges. Mirrors the legacy DAG's
+   *  per-language convention so consumers asserting on reason keep
+   *  working. */
+  readonly importEdgeReason: string;
+
   // ─── Pipeline hooks ────────────────────────────────────────────────────────
 
   /**
@@ -69,8 +80,17 @@ export interface EmitProvider {
    *
    * Called once per `ParsedImport` during `finalizeScopeModel`. The
    * Python implementation wraps `resolvePythonImportTarget`.
+   *
+   * `allFilePaths` is the workspace's file set — needed by per-language
+   * resolvers that must distinguish "this module exists in the repo"
+   * from "this module is external" (Python's fallback resolver, for
+   * example).
    */
-  resolveImportTarget(targetRaw: string, fromFile: string): string | null;
+  resolveImportTarget(
+    targetRaw: string,
+    fromFile: string,
+    allFilePaths: ReadonlySet<string>,
+  ): string | null;
 
   /**
    * Per-scope binding-merge precedence. The shared finalize pass

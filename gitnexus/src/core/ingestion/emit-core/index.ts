@@ -50,3 +50,8 @@ export { collectNamespaceTargets } from './namespace-targets.js';
 export { buildPopulatedMethodDispatch } from './method-dispatch-bridge.js';
 export type { ArityVerdict, EmitProvider, LinearizeStrategy } from './emit-provider.js';
 export { buildMro, defaultLinearize } from './build-mro.js';
+export {
+  runScopeResolution,
+  type RunScopeResolutionInput,
+  type RunScopeResolutionStats,
+} from './orchestrator.js';
