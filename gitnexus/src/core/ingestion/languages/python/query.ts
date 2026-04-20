@@ -108,6 +108,17 @@ export const PYTHON_SCOPE_QUERY = `
   left: (identifier) @type-binding.name
   right: (identifier) @type-binding.type) @type-binding.alias
 
+;; For-loop iterable of a free-call result:
+;;   def get_users() -> list[User]: ...
+;;   for u in get_users():   # u: get_users → User via chain follow
+;;       u.save()
+;; Captures the call's function identifier as the rawName. With
+;; \`propagateImportedReturnTypes\`, this works cross-file too.
+(for_statement
+  left: (identifier) @type-binding.name
+  right: (call
+    function: (identifier) @type-binding.type)) @type-binding.alias
+
 ;; Type bindings (variable annotations: \`u: User\` / \`u: User = x\`)
 (assignment
   left: (identifier) @type-binding.name

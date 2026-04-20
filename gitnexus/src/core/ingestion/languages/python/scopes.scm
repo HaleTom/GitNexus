@@ -125,6 +125,15 @@
   left: (identifier) @type-binding.name
   type: (type) @type-binding.type) @type-binding.annotation
 
+; For-loop iterable of a free-call result: `for u in get_users()` —
+; binds `u → get_users` so the chain post-pass follows it through
+; `get_users`'s return-type annotation (cross-file via
+; `propagateImportedReturnTypes`).
+(for_statement
+  left: (identifier) @type-binding.name
+  right: (call
+    function: (identifier) @type-binding.type)) @type-binding.alias
+
 ; ─── Type bindings: function return-type annotations ─────────────────────
 ;
 ; `def get_user() -> User:` — binds the function's NAME to its return
