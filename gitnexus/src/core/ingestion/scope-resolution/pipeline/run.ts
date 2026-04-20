@@ -36,6 +36,7 @@ import { emitFreeCallFallback } from '../passes/free-call-fallback.js';
 import { emitReferencesViaLookup } from '../graph-bridge/references-to-edges.js';
 import { emitImportEdges } from '../graph-bridge/imports-to-edges.js';
 import type { ScopeResolver } from '../contract/scope-resolver.js';
+import { buildWorkspaceResolutionIndex } from '../workspace-index.js';
 
 export interface RunScopeResolutionInput {
   readonly graph: KnowledgeGraph;
@@ -58,6 +59,8 @@ export function runScopeResolution(
 ): RunScopeResolutionStats {
   const { graph, files } = input;
   const onWarn = input.onWarn ?? (() => {});
+  const PROF = process.env.PROF_SCOPE_RESOLUTION === '1';
+  const tStart = PROF ? process.hrtime.bigint() : 0n;
 
   // ── Phase 1: extract each file → ParsedFile ────────────────────────────
   const parsedFiles: ParsedFile[] = [];
@@ -83,6 +86,8 @@ export function runScopeResolution(
     };
   }
 
+  const tExtract = PROF ? process.hrtime.bigint() : 0n;
+
   // ── Phase 2: finalize → ScopeResolutionIndexes ─────────────────────────
   const allFilePaths = new Set(parsedFiles.map((f) => f.filePath));
   const nodeLookup = buildGraphNodeLookup(graph);
@@ -103,11 +108,19 @@ export function runScopeResolution(
   (indexes as { methodDispatch: typeof indexes.methodDispatch }).methodDispatch =
     buildPopulatedMethodDispatch(mroByClassDefId);
 
+  // Build the workspace resolution index ONCE — turns every
+  // findOwnedMember / findExportedDef / classScopeByDefId lookup in
+  // the downstream passes from O(N×D) to O(1). Must run AFTER
+  // populateOwners (so memberByOwner is correct) and AFTER
+  // finalize (so module-scope bindings are available).
+  const workspaceIndex = buildWorkspaceResolutionIndex(parsedFiles);
+
   // Cross-file return-type propagation (Contract Invariant I3 timing:
   // after finalize, before resolve).
   if (provider.propagatesReturnTypesAcrossImports !== false) {
-    propagateImportedReturnTypes(parsedFiles, indexes);
+    propagateImportedReturnTypes(parsedFiles, indexes, workspaceIndex);
   }
+  const tFinalize = PROF ? process.hrtime.bigint() : 0n;
 
   // ── Phase 3: resolve references via Registry.lookup ────────────────────
   const registryProviders: RegistryProviders = {
@@ -117,6 +130,7 @@ export function runScopeResolution(
     scopes: indexes,
     providers: registryProviders,
   });
+  const tResolve = PROF ? process.hrtime.bigint() : 0n;
 
   // ── Phase 4: emit graph edges (LOAD-BEARING ORDER — see I1) ────────────
   const handledSites = new Set<string>();
@@ -127,6 +141,7 @@ export function runScopeResolution(
     nodeLookup,
     handledSites,
     provider,
+    workspaceIndex,
   );
   const freeCallExtras = emitFreeCallFallback(
     graph,
@@ -149,6 +164,19 @@ export function runScopeResolution(
     indexes.scopeTree,
     provider.importEdgeReason,
   );
+
+  if (PROF) {
+    const tEnd = process.hrtime.bigint();
+    const ns = (a: bigint, b: bigint): number => Number(b - a) / 1_000_000;
+    console.warn(
+      `[scope-resolution prof] extract=${ns(tStart, tExtract).toFixed(0)}ms` +
+        ` finalize+propagate=${ns(tExtract, tFinalize).toFixed(0)}ms` +
+        ` resolve=${ns(tFinalize, tResolve).toFixed(0)}ms` +
+        ` emit=${ns(tResolve, tEnd).toFixed(0)}ms` +
+        ` total=${ns(tStart, tEnd).toFixed(0)}ms` +
+        ` (${parsedFiles.length} files)`,
+    );
+  }
 
   return {
     filesProcessed: parsedFiles.length,

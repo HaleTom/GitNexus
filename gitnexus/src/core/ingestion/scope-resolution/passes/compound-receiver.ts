@@ -20,9 +20,9 @@
  * either don't trigger the call branch or skip this pass entirely.
  */
 
-import type { ParsedFile, ScopeId, SymbolDefinition, TypeRef } from 'gitnexus-shared';
-import type { Scope } from 'gitnexus-shared';
+import type { ScopeId, SymbolDefinition, TypeRef } from 'gitnexus-shared';
 import type { ScopeResolutionIndexes } from '../../model/scope-resolution-indexes.js';
+import type { WorkspaceResolutionIndex } from '../workspace-index.js';
 import {
   findClassBindingInScope,
   findExportedDefByName,
@@ -45,11 +45,11 @@ export function resolveCompoundReceiverClass(
   receiverText: string,
   inScope: ScopeId,
   scopes: ScopeResolutionIndexes,
-  parsedFiles: readonly ParsedFile[],
-  classScopeByDefId: ReadonlyMap<string, Scope>,
+  index: WorkspaceResolutionIndex,
   options: ResolveCompoundReceiverOptions = {},
   depth = 0,
 ): SymbolDefinition | undefined {
+  const classScopeByDefId = index.classScopeByDefId;
   if (depth > COMPOUND_RECEIVER_MAX_DEPTH) return undefined;
   const text = receiverText.trim();
   if (text.length === 0) return undefined;
@@ -77,7 +77,7 @@ export function resolveCompoundReceiverClass(
       // Free call `name()`. Look up function in scope, then its
       // return-type typeBinding (which lives in the function's
       // enclosing scope per the language's return-type hoist rule).
-      const fnDef = findExportedDefByName(fnExpr, inScope, scopes, parsedFiles);
+      const fnDef = findExportedDefByName(fnExpr, inScope, scopes, index);
       if (fnDef === undefined) return undefined;
       const retType = findReceiverTypeBinding(inScope, fnExpr, scopes);
       if (retType === undefined) return undefined;
@@ -92,8 +92,7 @@ export function resolveCompoundReceiverClass(
       objExpr,
       inScope,
       scopes,
-      parsedFiles,
-      classScopeByDefId,
+      index,
       options,
       depth + 1,
     );

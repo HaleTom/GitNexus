@@ -18,8 +18,9 @@
  * generalization plan.
  */
 
-import type { ParsedFile, Scope, ScopeId, TypeRef } from 'gitnexus-shared';
+import type { ParsedFile, ScopeId, TypeRef } from 'gitnexus-shared';
 import type { ScopeResolutionIndexes } from '../../model/scope-resolution-indexes.js';
+import type { WorkspaceResolutionIndex } from '../workspace-index.js';
 
 /** Max chain depth for the post-finalize re-follow. */
 const RECHAIN_MAX_DEPTH = 8;
@@ -70,13 +71,9 @@ export function followChainPostFinalize(
 export function propagateImportedReturnTypes(
   parsedFiles: readonly ParsedFile[],
   indexes: ScopeResolutionIndexes,
+  index: WorkspaceResolutionIndex,
 ): void {
-  // Index module scopes by filePath for fast cross-file lookup.
-  const moduleScopeByFile = new Map<string, Scope>();
-  for (const parsed of parsedFiles) {
-    const moduleScope = parsed.scopes.find((s) => s.kind === 'Module');
-    if (moduleScope !== undefined) moduleScopeByFile.set(parsed.filePath, moduleScope);
-  }
+  const moduleScopeByFile = index.moduleScopeByFile;
 
   for (const parsed of parsedFiles) {
     const importerModule = moduleScopeByFile.get(parsed.filePath);

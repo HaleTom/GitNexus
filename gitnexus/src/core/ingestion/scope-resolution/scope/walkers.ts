@@ -21,7 +21,7 @@
 
 import type { ParsedFile, ScopeId, SymbolDefinition, TypeRef } from 'gitnexus-shared';
 import type { ScopeResolutionIndexes } from '../../model/scope-resolution-indexes.js';
-import { simpleQualifiedName } from '../graph-bridge/ids.js';
+import type { WorkspaceResolutionIndex } from '../workspace-index.js';
 
 /**
  * Walk the scope chain from `startScope` looking for a typeBinding
@@ -224,7 +224,7 @@ export function findExportedDefByName(
   name: string,
   inScope: ScopeId,
   scopes: ScopeResolutionIndexes,
-  parsedFiles: readonly ParsedFile[],
+  index: WorkspaceResolutionIndex,
 ): SymbolDefinition | undefined {
   let currentId: ScopeId | null = inScope;
   const visited = new Set<ScopeId>();
@@ -247,54 +247,38 @@ export function findExportedDefByName(
     }
     currentId = scope.parent;
   }
-  // Fallback: scan parsed files for any matching simple-name def.
-  for (const f of parsedFiles) {
-    for (const def of f.localDefs) {
-      if (def.type !== 'Function' && def.type !== 'Method') continue;
-      const qn = def.qualifiedName;
-      if (qn === undefined) continue;
-      const simple = qn.lastIndexOf('.') === -1 ? qn : qn.slice(qn.lastIndexOf('.') + 1);
-      if (simple === name) return def;
-    }
-  }
-  return undefined;
+  // Workspace-wide fallback: O(1) lookup via the pre-built
+  // `callablesBySimpleName` index. First-seen-by-file wins (matches
+  // the previous nested-loop semantics where the outer iteration is
+  // `parsedFiles`).
+  return index.callablesBySimpleName.get(name)?.[0];
 }
 
 /**
- * Find a member of a class by simple name — a def whose `ownerId`
- * matches the class's nodeId and whose simple name matches `memberName`.
+ * Find a member of a class by simple name — O(1) lookup via the
+ * pre-built `memberByOwner` index from `WorkspaceResolutionIndex`.
+ *
+ * Pre-index baseline: O(N × D) per call (full parsedFiles scan).
+ * Indexed: O(1) `Map.get`. The receiver-bound dispatcher calls this
+ * up to (sites × MRO depth) times per workspace.
  */
 export function findOwnedMember(
   ownerDefId: string,
   memberName: string,
-  parsedFiles: readonly ParsedFile[],
+  index: WorkspaceResolutionIndex,
 ): SymbolDefinition | undefined {
-  for (const f of parsedFiles) {
-    for (const def of f.localDefs) {
-      if (def.ownerId !== ownerDefId) continue;
-      if (simpleQualifiedName(def) !== memberName) continue;
-      return def;
-    }
-  }
-  return undefined;
+  return index.memberByOwner.get(ownerDefId)?.get(memberName);
 }
 
 /**
- * Find a file-level exported def (top-of-module class / function /
- * variable) by `simpleName` in a given target file's `parsedFile.localDefs`.
+ * Find a file-level def (top-of-module class / function / variable)
+ * by `simpleName` — O(1) lookup via the pre-built
+ * `defsByFileAndName` index.
  */
 export function findExportedDef(
   targetFile: string,
   memberName: string,
-  parsedFiles: readonly ParsedFile[],
+  index: WorkspaceResolutionIndex,
 ): SymbolDefinition | undefined {
-  for (const f of parsedFiles) {
-    if (f.filePath !== targetFile) continue;
-    for (const def of f.localDefs) {
-      if (simpleQualifiedName(def) !== memberName) continue;
-      return def;
-    }
-    return undefined;
-  }
-  return undefined;
+  return index.defsByFileAndName.get(targetFile)?.get(memberName);
 }

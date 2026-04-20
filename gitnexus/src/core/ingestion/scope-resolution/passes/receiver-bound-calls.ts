@@ -30,11 +30,11 @@
  */
 
 import type { ParsedFile, SymbolDefinition } from 'gitnexus-shared';
-import type { Scope } from 'gitnexus-shared';
 import type { KnowledgeGraph } from '../../../graph/types.js';
 import type { ScopeResolutionIndexes } from '../../model/scope-resolution-indexes.js';
 import type { ScopeResolver } from '../contract/scope-resolver.js';
 import type { GraphNodeLookup } from '../graph-bridge/node-lookup.js';
+import type { WorkspaceResolutionIndex } from '../workspace-index.js';
 import { collectNamespaceTargets } from '../scope/namespace-targets.js';
 import {
   findClassBindingInScope,
@@ -61,6 +61,7 @@ export function emitReceiverBoundCalls(
   nodeLookup: GraphNodeLookup,
   handledSites: Set<string>,
   provider: ReceiverBoundProviderSubset,
+  index: WorkspaceResolutionIndex,
 ): number {
   let emitted = 0;
   // Per-pass dedup so the multiple cases don't double-emit if two of
@@ -68,18 +69,6 @@ export function emitReceiverBoundCalls(
   // from the reference index — see Contract Invariant I5.
   const seen = new Set<string>();
   const fieldFallback = provider.fieldFallbackOnMethodLookup ?? true;
-
-  // Class def → Class scope map (for field-chain field-type lookup).
-  // The class scope's `ownedDefs` contains the Class def per pass2's
-  // structural-ownership rule.
-  const classScopeByDefId = new Map<string, Scope>();
-  for (const p of parsedFiles) {
-    for (const scope of p.scopes) {
-      if (scope.kind !== 'Class') continue;
-      const cd = scope.ownedDefs.find((d) => d.type === 'Class');
-      if (cd !== undefined) classScopeByDefId.set(cd.nodeId, scope);
-    }
-  }
 
   for (const parsed of parsedFiles) {
     const namespaceTargets = collectNamespaceTargets(parsed, scopes);
@@ -99,7 +88,7 @@ export function emitReceiverBoundCalls(
           const ancestors = scopes.methodDispatch.mroFor(enclosingClass.nodeId);
           let memberDef: SymbolDefinition | undefined;
           for (const ownerId of ancestors) {
-            memberDef = findOwnedMember(ownerId, memberName, parsedFiles);
+            memberDef = findOwnedMember(ownerId, memberName, index);
             if (memberDef !== undefined) break;
           }
           if (memberDef !== undefined) {
@@ -127,15 +116,14 @@ export function emitReceiverBoundCalls(
           receiverName,
           site.inScope,
           scopes,
-          parsedFiles,
-          classScopeByDefId,
+          index,
           { fieldFallback },
         );
         if (currentClass !== undefined) {
           const chain = [currentClass.nodeId, ...scopes.methodDispatch.mroFor(currentClass.nodeId)];
           let memberDef: SymbolDefinition | undefined;
           for (const ownerId of chain) {
-            memberDef = findOwnedMember(ownerId, memberName, parsedFiles);
+            memberDef = findOwnedMember(ownerId, memberName, index);
             if (memberDef !== undefined) break;
           }
           if (memberDef !== undefined) {
@@ -160,7 +148,7 @@ export function emitReceiverBoundCalls(
       // ── Case 1: namespace receiver ───────────────────────────────
       const targetFile = namespaceTargets.get(receiverName);
       if (targetFile !== undefined) {
-        const memberDef = findExportedDef(targetFile, memberName, parsedFiles);
+        const memberDef = findExportedDef(targetFile, memberName, index);
         if (memberDef !== undefined) {
           const ok = tryEmitEdge(
             graph,
@@ -185,7 +173,7 @@ export function emitReceiverBoundCalls(
         const chain = [classDef.nodeId, ...scopes.methodDispatch.mroFor(classDef.nodeId)];
         let memberDef: SymbolDefinition | undefined;
         for (const ownerId of chain) {
-          memberDef = findOwnedMember(ownerId, memberName, parsedFiles);
+          memberDef = findOwnedMember(ownerId, memberName, index);
           if (memberDef !== undefined) break;
         }
         if (memberDef !== undefined) {
@@ -213,9 +201,9 @@ export function emitReceiverBoundCalls(
         const className = classNameParts.join('.');
         const targetFile3 = namespaceTargets.get(nsName);
         if (targetFile3 !== undefined && className.length > 0) {
-          const classDef3 = findExportedDef(targetFile3, className, parsedFiles);
+          const classDef3 = findExportedDef(targetFile3, className, index);
           if (classDef3 !== undefined) {
-            const memberDef = findOwnedMember(classDef3.nodeId, memberName, parsedFiles);
+            const memberDef = findOwnedMember(classDef3.nodeId, memberName, index);
             if (memberDef !== undefined) {
               const ok = tryEmitEdge(
                 graph,
@@ -247,15 +235,14 @@ export function emitReceiverBoundCalls(
           typeRef.rawName + '()',
           typeRef.declaredAtScope,
           scopes,
-          parsedFiles,
-          classScopeByDefId,
+          index,
           { fieldFallback },
         );
         if (ownerDef !== undefined) {
           const chain = [ownerDef.nodeId, ...scopes.methodDispatch.mroFor(ownerDef.nodeId)];
           let memberDef: SymbolDefinition | undefined;
           for (const ownerId of chain) {
-            memberDef = findOwnedMember(ownerId, memberName, parsedFiles);
+            memberDef = findOwnedMember(ownerId, memberName, index);
             if (memberDef !== undefined) break;
           }
           if (memberDef !== undefined) {
@@ -284,7 +271,7 @@ export function emitReceiverBoundCalls(
           const chain = [ownerDef.nodeId, ...scopes.methodDispatch.mroFor(ownerDef.nodeId)];
           let memberDef: SymbolDefinition | undefined;
           for (const ownerId of chain) {
-            memberDef = findOwnedMember(ownerId, memberName, parsedFiles);
+            memberDef = findOwnedMember(ownerId, memberName, index);
             if (memberDef !== undefined) break;
           }
           if (memberDef !== undefined) {
