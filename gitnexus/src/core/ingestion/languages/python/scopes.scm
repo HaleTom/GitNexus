@@ -197,6 +197,22 @@
   (#eq? @_enum "enumerate")
   (#eq? @_items "items")) @type-binding.alias
 
+; for i, k, v in enumerate(d.items()) — 3-var flat destructuring.
+(for_statement
+  left: (pattern_list
+    (identifier)
+    (identifier)
+    (identifier) @type-binding.name)
+  right: (call
+    function: (identifier) @_enum
+    arguments: (argument_list
+      (call
+        function: (attribute
+          object: (identifier) @type-binding.type
+          attribute: (identifier) @_items))))
+  (#eq? @_enum "enumerate")
+  (#eq? @_items "items")) @type-binding.alias
+
 ; for v in d.values() — bind v to d (dict-strip yields value type).
 (for_statement
   left: (identifier) @type-binding.name
