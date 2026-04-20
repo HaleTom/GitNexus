@@ -53,6 +53,7 @@ import {
   collectNamespaceTargets,
   emitImportEdges,
   emitReferencesViaLookup,
+  findCallableBindingInScope,
   findClassBindingInScope,
   findExportedDef,
   findOwnedMember,
@@ -201,6 +202,20 @@ export function runPythonScopeResolution(
     referenceIndex,
   );
 
+  // Free-call finalized-binding fallback. The shared `MethodRegistry.lookup`
+  // walks `scope.bindings` for the call's name, but `scope.bindings`
+  // only carries pre-finalize local declarations. Cross-file imports
+  // land in `indexes.bindings` (post-finalize). Without consulting that
+  // second source, every imported `f()` call resolves to "unresolved".
+  // Mirror the dual-source pattern from `findClassBindingInScope`.
+  const freeCallExtras = emitFreeCallFallback(
+    graph,
+    indexes,
+    parsedFiles,
+    nodeLookup,
+    referenceIndex,
+  );
+
   // IMPORTS edges: the scope-resolution path now owns Python file→file
   // IMPORTS edge emission when `REGISTRY_PRIMARY_PYTHON=1`. The legacy
   // `processImports` path still runs (heritage needs its `importMap`
@@ -219,7 +234,7 @@ export function runPythonScopeResolution(
     filesSkipped,
     importsEmitted,
     resolve: resolveStats,
-    referenceEdgesEmitted: emitted + receiverExtras,
+    referenceEdgesEmitted: emitted + receiverExtras + freeCallExtras,
     referenceSkipped: skipped,
   };
 }
@@ -493,6 +508,70 @@ function emitReceiverBoundCalls(
     }
   }
 
+  return emitted;
+}
+
+/**
+ * Emit CALLS edges for free-call reference sites whose target is
+ * imported (or otherwise visible only via post-finalize scope.bindings).
+ *
+ * The shared `MethodRegistry.lookup` only consults `scope.bindings`
+ * (pre-finalize / local-only) for free calls. Cross-file imports land
+ * in `indexes.bindings` (post-finalize). Without this fallback, every
+ * `from x import f; f()` resolves to "unresolved".
+ *
+ * Same dual-source pattern as `findClassBindingInScope` — but accepts
+ * Function/Method/Constructor instead of Class. Pre-seeds `seen` from
+ * the shared resolver's emissions so we don't double-emit.
+ */
+function emitFreeCallFallback(
+  graph: KnowledgeGraph,
+  scopes: ScopeResolutionIndexes,
+  parsedFiles: readonly ParsedFile[],
+  nodeLookup: GraphNodeLookup,
+  referenceIndex: { readonly bySourceScope: ReadonlyMap<ScopeId, readonly Reference[]> },
+): number {
+  let emitted = 0;
+  const seen = new Set<string>();
+  // Pre-seed `seen` with whatever the shared resolver + receiver-bound
+  // pass already emitted so we never double-count an edge that another
+  // path produced.
+  for (const refs of referenceIndex.bySourceScope.values()) {
+    for (const r of refs) {
+      const targetDef = scopes.defs.get(r.toDef);
+      if (targetDef === undefined) continue;
+      const callerGraphId = resolveCallerGraphId(r.fromScope, scopes, nodeLookup);
+      if (callerGraphId === undefined) continue;
+      const tgtGraphId = resolveDefGraphId(targetDef.filePath, targetDef, nodeLookup);
+      if (tgtGraphId === undefined) continue;
+      const kind = mapReferenceKindToEdgeType(r.kind);
+      if (kind === undefined) continue;
+      seen.add(
+        `${kind}:${callerGraphId}->${tgtGraphId}:${r.atRange.startLine}:${r.atRange.startCol}`,
+      );
+    }
+  }
+
+  for (const parsed of parsedFiles) {
+    for (const site of parsed.referenceSites) {
+      if (site.kind !== 'call') continue;
+      if (site.explicitReceiver !== undefined) continue;
+
+      const fnDef = findCallableBindingInScope(site.inScope, site.name, scopes);
+      if (fnDef === undefined) continue;
+
+      const ok = tryEmitEdge(
+        graph,
+        scopes,
+        nodeLookup,
+        site,
+        fnDef,
+        'python-scope: free-call-import',
+        seen,
+      );
+      if (ok) emitted++;
+    }
+  }
   return emitted;
 }
 

@@ -31,6 +31,7 @@ export { emitImportEdges } from './emit-imports.js';
 export {
   findReceiverTypeBinding,
   findClassBindingInScope,
+  findCallableBindingInScope,
   findOwnedMember,
   findExportedDef,
 } from './scope-walkers.js';

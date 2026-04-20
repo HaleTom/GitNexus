@@ -92,6 +92,52 @@ export function findClassBindingInScope(
 }
 
 /**
+ * Look up a callable (Function/Method/Constructor) by name in the
+ * given scope's chain. Uses the dual-source pattern (scope.bindings +
+ * indexes.bindings) so cross-file imports are visible — without it
+ * free calls to imported functions never resolve via the post-pass.
+ *
+ * Mirrors `findClassBindingInScope` exactly; only the accepted
+ * def-type predicate differs.
+ */
+export function findCallableBindingInScope(
+  startScope: ScopeId,
+  callableName: string,
+  scopes: ScopeResolutionIndexes,
+): SymbolDefinition | undefined {
+  let currentId: ScopeId | null = startScope;
+  const visited = new Set<ScopeId>();
+  while (currentId !== null) {
+    if (visited.has(currentId)) return undefined;
+    visited.add(currentId);
+    const scope = scopes.scopeTree.getScope(currentId);
+    if (scope === undefined) return undefined;
+
+    const localBindings = scope.bindings.get(callableName);
+    if (localBindings !== undefined) {
+      for (const b of localBindings) {
+        if (b.def.type === 'Function' || b.def.type === 'Method' || b.def.type === 'Constructor') {
+          return b.def;
+        }
+      }
+    }
+
+    const finalizedScopeBindings = scopes.bindings.get(currentId);
+    const importedBindings = finalizedScopeBindings?.get(callableName);
+    if (importedBindings !== undefined) {
+      for (const b of importedBindings) {
+        if (b.def.type === 'Function' || b.def.type === 'Method' || b.def.type === 'Constructor') {
+          return b.def;
+        }
+      }
+    }
+
+    currentId = scope.parent;
+  }
+  return undefined;
+}
+
+/**
  * Find a member of a class by simple name — a def whose `ownerId`
  * matches the class's nodeId and whose simple name matches `memberName`.
  */
