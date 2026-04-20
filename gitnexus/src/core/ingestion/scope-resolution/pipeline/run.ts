@@ -17,25 +17,25 @@
  *     KnowledgeGraph
  *
  * Per-language entry points (e.g. `runPythonScopeResolution` in
- * `languages/python/emit/index.ts`) construct an `EmitProvider` and
+ * `languages/python/scope-resolver.ts`) construct an `ScopeResolver` and
  * delegate here.
  *
  * Plan: `docs/plans/2026-04-20-001-refactor-emit-pipeline-generalization-plan.md`.
  */
 
 import type { ParsedFile, RegistryProviders } from 'gitnexus-shared';
-import type { KnowledgeGraph } from '../../graph/types.js';
-import { extractParsedFile } from '../scope-extractor-bridge.js';
-import { finalizeScopeModel } from '../finalize-orchestrator.js';
-import { resolveReferenceSites, type ResolveStats } from '../resolve-references.js';
-import { buildGraphNodeLookup } from './graph-node-lookup.js';
-import { buildPopulatedMethodDispatch } from './method-dispatch-bridge.js';
-import { propagateImportedReturnTypes } from './propagate-return-types.js';
-import { emitReceiverBoundCalls } from './emit-receiver-bound.js';
-import { emitFreeCallFallback } from './emit-free-call.js';
-import { emitReferencesViaLookup } from './emit-references.js';
-import { emitImportEdges } from './emit-imports.js';
-import type { EmitProvider } from './emit-provider.js';
+import type { KnowledgeGraph } from '../../../graph/types.js';
+import { extractParsedFile } from '../../scope-extractor-bridge.js';
+import { finalizeScopeModel } from '../../finalize-orchestrator.js';
+import { resolveReferenceSites, type ResolveStats } from '../../resolve-references.js';
+import { buildGraphNodeLookup } from '../graph-bridge/node-lookup.js';
+import { buildPopulatedMethodDispatch } from '../graph-bridge/method-dispatch.js';
+import { propagateImportedReturnTypes } from '../passes/imported-return-types.js';
+import { emitReceiverBoundCalls } from '../passes/receiver-bound-calls.js';
+import { emitFreeCallFallback } from '../passes/free-call-fallback.js';
+import { emitReferencesViaLookup } from '../graph-bridge/references-to-edges.js';
+import { emitImportEdges } from '../graph-bridge/imports-to-edges.js';
+import type { ScopeResolver } from '../contract/scope-resolver.js';
 
 export interface RunScopeResolutionInput {
   readonly graph: KnowledgeGraph;
@@ -54,7 +54,7 @@ export interface RunScopeResolutionStats {
 
 export function runScopeResolution(
   input: RunScopeResolutionInput,
-  provider: EmitProvider,
+  provider: ScopeResolver,
 ): RunScopeResolutionStats {
   const { graph, files } = input;
   const onWarn = input.onWarn ?? (() => {});

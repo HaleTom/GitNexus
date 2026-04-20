@@ -18,9 +18,9 @@
  */
 
 import type { ScopeId, SymbolDefinition } from 'gitnexus-shared';
-import type { ScopeResolutionIndexes } from '../model/scope-resolution-indexes.js';
-import { generateId } from '../../../lib/utils.js';
-import { isLinkableLabel, type GraphNodeLookup } from './graph-node-lookup.js';
+import type { ScopeResolutionIndexes } from '../../model/scope-resolution-indexes.js';
+import { generateId } from '../../../../lib/utils.js';
+import { isLinkableLabel, type GraphNodeLookup } from '../graph-bridge/node-lookup.js';
 
 /** Look up a `SymbolDefinition` in the graph node lookup by file+name. */
 export function resolveDefGraphId(

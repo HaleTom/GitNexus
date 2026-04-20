@@ -1,20 +1,20 @@
 /**
- * `EmitProvider` — the per-language contract consumed by the generic
+ * `ScopeResolver` — the per-language contract consumed by the generic
  * scope-resolution orchestrator (`runScopeResolution`).
  *
  * ## Migration cookbook (next language)
  *
  * To add a language to the registry-primary path:
  *
- *   1. Implement `EmitProvider` in
- *      `gitnexus/src/core/ingestion/languages/<lang>/emit/index.ts`.
+ *   1. Implement `ScopeResolver` in
+ *      `gitnexus/src/core/ingestion/languages/<lang>/scope-resolver.ts`.
  *      Six required fields (language, languageProvider,
  *      importEdgeReason, resolveImportTarget, mergeBindings,
  *      arityCompatibility, buildMro, populateOwners, isSuperReceiver)
  *      plus two optional booleans (propagatesReturnTypesAcrossImports,
  *      fieldFallbackOnMethodLookup).
  *   2. Export a thin entry point:
- *      `runYourLangScopeResolution(input) = runScopeResolution(input, yourEmitProvider)`.
+ *      `runYourLangScopeResolution(input) = runScopeResolution(input, yourScopeResolver)`.
  *   3. Register the provider in
  *      `gitnexus/src/core/ingestion/emit-providers-registry.ts`.
  *   4. Add `SupportedLanguages.YourLang` to `MIGRATED_LANGUAGES` in
@@ -28,7 +28,7 @@
  * change. The generic `scopeResolutionPhase` and the CI parity
  * workflow auto-discover everything via `MIGRATED_LANGUAGES`.
  *
- * ## EmitProvider vs LanguageProvider
+ * ## ScopeResolver vs LanguageProvider
  *
  * The codebase has two provider contracts. Their lifecycles differ:
  *
@@ -37,7 +37,7 @@
  *     scopes, interpret imports / typeBindings. ~40 fields covering
  *     both legacy and new pipelines. Consumed by `ScopeExtractor`,
  *     once per file at extract time.
- *   - `EmitProvider` (this file) is the **emit-side** contract — how
+ *   - `ScopeResolver` (this file) is the **emit-side** contract — how
  *     the resolution pipeline dispatches references to graph edges.
  *     8 fields total. Consumed by `runScopeResolution`, once per
  *     workspace at resolve time.
@@ -51,8 +51,8 @@
  *
  * ## Reference implementation
  *
- * `gitnexus/src/core/ingestion/languages/python/emit/index.ts` —
- * `pythonEmitProvider` is the canonical example. Read that file when
+ * `gitnexus/src/core/ingestion/languages/python/scope-resolver.ts` —
+ * `pythonScopeResolver` is the canonical example. Read that file when
  * migrating a new language; this interface lists the fields that
  * implementation populates.
  *
@@ -81,9 +81,9 @@ import type {
   SupportedLanguages,
   SymbolDefinition,
 } from 'gitnexus-shared';
-import type { KnowledgeGraph } from '../../graph/types.js';
-import type { GraphNodeLookup } from './graph-node-lookup.js';
-import { LanguageProvider } from '../language-provider.js';
+import type { KnowledgeGraph } from '../../../graph/types.js';
+import type { GraphNodeLookup } from '../graph-bridge/node-lookup.js';
+import { LanguageProvider } from '../../language-provider.js';
 
 /** A LinearizeStrategy receives the full ancestor map so C3-style
  *  algorithms (which need to merge each parent's MRO) can implement
@@ -95,10 +95,10 @@ export type LinearizeStrategy = (
   parentsByDefId: ReadonlyMap<string, readonly string[]>,
 ) => string[];
 
-/** Result of `EmitProvider.arityCompatibility` — mirrors `RegistryProviders.arityCompatibility`. */
+/** Result of `ScopeResolver.arityCompatibility` — mirrors `RegistryProviders.arityCompatibility`. */
 export type ArityVerdict = 'compatible' | 'unknown' | 'incompatible';
 
-export interface EmitProvider {
+export interface ScopeResolver {
   /** Identity for telemetry + per-language flag check. */
   readonly language: SupportedLanguages;
 

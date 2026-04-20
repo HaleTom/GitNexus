@@ -20,7 +20,7 @@
  */
 
 import type { ParsedFile } from 'gitnexus-shared';
-import type { ScopeResolutionIndexes } from '../model/scope-resolution-indexes.js';
+import type { ScopeResolutionIndexes } from '../../model/scope-resolution-indexes.js';
 
 export function collectNamespaceTargets(
   parsed: ParsedFile,

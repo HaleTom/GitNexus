@@ -20,10 +20,10 @@
  */
 
 import type { ParsedFile } from 'gitnexus-shared';
-import type { KnowledgeGraph } from '../../graph/types.js';
-import type { GraphNodeLookup } from './graph-node-lookup.js';
-import type { LinearizeStrategy } from './emit-provider.js';
-import { resolveDefGraphId } from './graph-id.js';
+import type { KnowledgeGraph } from '../../../graph/types.js';
+import type { GraphNodeLookup } from '../graph-bridge/node-lookup.js';
+import type { LinearizeStrategy } from '../contract/scope-resolver.js';
+import { resolveDefGraphId } from '../graph-bridge/ids.js';
 
 /**
  * Build an MRO map keyed by scope-resolution Class `DefId`.

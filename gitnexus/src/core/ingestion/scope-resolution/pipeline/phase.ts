@@ -4,7 +4,7 @@
  * Generic registry-primary resolution phase (RFC #909 Ring 4).
  *
  * For every language in `MIGRATED_LANGUAGES` (per-language flag set)
- * whose provider is registered in `EMIT_PROVIDERS`:
+ * whose provider is registered in `SCOPE_RESOLVERS`:
  *   1. Filter scanned files by language extension.
  *   2. Read file contents.
  *   3. Drive the scope-based pipeline end-to-end via the generic
@@ -16,7 +16,7 @@
  * primary, so we don't double-emit edges from both code paths.
  *
  * Adding a language is two changes:
- *   - Implement `EmitProvider` in `languages/<lang>/emit/index.ts`
+ *   - Implement `ScopeResolver` in `languages/<lang>/emit/index.ts`
  *     and register it in `emit-providers-registry.ts`.
  *   - Add the language to `MIGRATED_LANGUAGES` in
  *     `registry-primary-flag.ts`.
@@ -27,15 +27,15 @@
  * @writes  graph (IMPORTS, CALLS, ACCESSES, INHERITS, USES)
  */
 
-import type { PipelinePhase, PipelineContext, PhaseResult } from './types.js';
-import { getPhaseOutput } from './types.js';
-import type { StructureOutput } from './structure.js';
-import { isRegistryPrimary } from '../registry-primary-flag.js';
+import type { PipelinePhase, PipelineContext, PhaseResult } from '../../pipeline-phases/types.js';
+import { getPhaseOutput } from '../../pipeline-phases/types.js';
+import type { StructureOutput } from '../../pipeline-phases/structure.js';
+import { isRegistryPrimary } from '../../registry-primary-flag.js';
 import { SupportedLanguages, getLanguageFromFilename } from 'gitnexus-shared';
-import { readFileContents } from '../filesystem-walker.js';
-import { runScopeResolution } from '../emit-core/index.js';
-import { EMIT_PROVIDERS } from '../emit-providers-registry.js';
-import { isDev } from '../utils/env.js';
+import { readFileContents } from '../../filesystem-walker.js';
+import { runScopeResolution } from './run.js';
+import { SCOPE_RESOLVERS } from './registry.js';
+import { isDev } from '../../utils/env.js';
 
 export interface ScopeResolutionOutput {
   /** True when at least one language ran. */
@@ -92,7 +92,7 @@ export const scopeResolutionPhase: PipelinePhase<ScopeResolutionOutput> = {
       }
     >();
 
-    for (const [lang, provider] of EMIT_PROVIDERS) {
+    for (const [lang, provider] of SCOPE_RESOLVERS) {
       if (!isRegistryPrimary(lang)) continue;
 
       const langFiles = scannedFiles.filter((f) => getLanguageFromFilename(f.path) === lang);

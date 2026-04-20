@@ -12,7 +12,7 @@
  *   - `ast-utils.ts`            — generic `SyntaxNode` helpers
  *   - `import-decomposer.ts`    — `import a, b` / `from m import x, y` → one match per name
  *   - `receiver-binding.ts`     — synthesize `self`/`cls` type bindings on methods
- *   - `emit-captures.ts`        — `emitPythonScopeCaptures` (top-level orchestrator)
+ *   - `captures.ts`        — `emitPythonScopeCaptures` (top-level orchestrator)
  *   - `interpret.ts`            — capture-match → `ParsedImport` / `ParsedTypeBinding`
  *   - `merge-bindings.ts`       — Python LEGB precedence
  *   - `arity.ts`                — Python arity check (`*args`, `**kwargs`, defaults)
@@ -21,7 +21,7 @@
  */
 
 export { PYTHON_SCOPE_QUERY } from './query.js';
-export { emitPythonScopeCaptures } from './emit-captures.js';
+export { emitPythonScopeCaptures } from './captures.js';
 export { interpretPythonImport, interpretPythonTypeBinding } from './interpret.js';
 export { pythonMergeBindings } from './merge-bindings.js';
 export { pythonArityCompatibility } from './arity.js';

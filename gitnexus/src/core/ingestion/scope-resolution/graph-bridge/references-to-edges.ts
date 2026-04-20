@@ -19,11 +19,11 @@
  */
 
 import type { Reference, ScopeId } from 'gitnexus-shared';
-import type { KnowledgeGraph } from '../../graph/types.js';
-import type { ScopeResolutionIndexes } from '../model/scope-resolution-indexes.js';
-import { resolveCallerGraphId, resolveDefGraphId } from './graph-id.js';
-import { mapReferenceKindToEdgeType } from './emit-edge.js';
-import type { GraphNodeLookup } from './graph-node-lookup.js';
+import type { KnowledgeGraph } from '../../../graph/types.js';
+import type { ScopeResolutionIndexes } from '../../model/scope-resolution-indexes.js';
+import { resolveCallerGraphId, resolveDefGraphId } from '../graph-bridge/ids.js';
+import { mapReferenceKindToEdgeType } from '../graph-bridge/edges.js';
+import type { GraphNodeLookup } from '../graph-bridge/node-lookup.js';
 
 /**
  * Optional opaque skip key — providers may pre-emit edges (e.g. via

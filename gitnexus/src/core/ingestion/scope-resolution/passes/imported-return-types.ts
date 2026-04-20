@@ -2,7 +2,7 @@
  * Cross-file return-type typeBinding propagation + post-finalize
  * chain re-follow.
  *
- * **Why this lives in emit-core:** the algorithm is language-agnostic.
+ * **Why this lives in scope-resolution:** the algorithm is language-agnostic.
  * Every language with cross-file callable imports needs the same
  * mirror-binding step, otherwise `u = f(); u.save()` only resolves
  * when `f` is in the same file as the call.
@@ -14,12 +14,12 @@
  *     populated) but BEFORE `resolveReferenceSites` (so resolution
  *     sees the propagated types).
  *
- * Generic; promoted from `python-scope-emit.ts` per the emit-core
+ * Generic; promoted from `languages/python/scope-resolver.ts` per the scope-resolution
  * generalization plan.
  */
 
 import type { ParsedFile, Scope, ScopeId, TypeRef } from 'gitnexus-shared';
-import type { ScopeResolutionIndexes } from '../model/scope-resolution-indexes.js';
+import type { ScopeResolutionIndexes } from '../../model/scope-resolution-indexes.js';
 
 /** Max chain depth for the post-finalize re-follow. */
 const RECHAIN_MAX_DEPTH = 8;

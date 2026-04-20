@@ -20,8 +20,8 @@
  */
 
 import type { ParsedFile, ScopeId, SymbolDefinition, TypeRef } from 'gitnexus-shared';
-import type { ScopeResolutionIndexes } from '../model/scope-resolution-indexes.js';
-import { simpleQualifiedName } from './graph-id.js';
+import type { ScopeResolutionIndexes } from '../../model/scope-resolution-indexes.js';
+import { simpleQualifiedName } from '../graph-bridge/ids.js';
 
 /**
  * Walk the scope chain from `startScope` looking for a typeBinding

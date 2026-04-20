@@ -1,14 +1,14 @@
 /**
- * Python `EmitProvider` and the `runPythonScopeResolution` entry point.
+ * Python `ScopeResolver` and the `resolvePythonScope` entry point.
  *
  * The provider is a thin wiring object — Python's specific bits
  * (super recognizer, LEGB merge precedence, Python's relative-import
  * resolver, the simplified MRO walk) plug into the generic
- * `runScopeResolution` orchestrator from `emit-core/`.
+ * `runScopeResolution` orchestrator from `scope-resolution/`.
  *
  * Migration reference: when bringing up the next language
  * (TypeScript / Java / Kotlin / Ruby), copy this file's structure —
- * implement the 6 required `EmitProvider` fields, optionally toggle
+ * implement the 6 required `ScopeResolver` fields, optionally toggle
  * the 2 booleans, and call `runScopeResolution(input, provider)`.
  */
 
@@ -19,19 +19,19 @@ import {
   defaultLinearize,
   populateClassOwnedMembers,
   runScopeResolution,
-  type EmitProvider,
+  type ScopeResolver,
   type RunScopeResolutionInput,
   type RunScopeResolutionStats,
-} from '../../../emit-core/index.js';
-import { pythonProvider } from '../../python.js';
+} from '../../scope-resolution/index.js';
+import { pythonProvider } from '../python.js';
 import {
   pythonArityCompatibility,
   pythonMergeBindings,
   resolvePythonImportTarget,
   type PythonResolveContext,
-} from '../index.js';
+} from './index.js';
 
-const pythonEmitProvider: EmitProvider = {
+const pythonScopeResolver: ScopeResolver = {
   language: SupportedLanguages.Python,
   languageProvider: pythonProvider,
   importEdgeReason: 'python-scope: import',
@@ -77,13 +77,11 @@ const pythonEmitProvider: EmitProvider = {
   propagatesReturnTypesAcrossImports: true,
 };
 
-export { pythonEmitProvider };
+export { pythonScopeResolver };
 
-export interface RunPythonScopeResolutionInput extends RunScopeResolutionInput {}
-export interface RunPythonScopeResolutionStats extends RunScopeResolutionStats {}
+export interface ResolvePythonScopeInput extends RunScopeResolutionInput {}
+export interface ResolvePythonScopeStats extends RunScopeResolutionStats {}
 
-export function runPythonScopeResolution(
-  input: RunPythonScopeResolutionInput,
-): RunPythonScopeResolutionStats {
-  return runScopeResolution(input, pythonEmitProvider);
+export function resolvePythonScope(input: ResolvePythonScopeInput): ResolvePythonScopeStats {
+  return runScopeResolution(input, pythonScopeResolver);
 }

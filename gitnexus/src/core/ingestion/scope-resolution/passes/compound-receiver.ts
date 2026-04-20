@@ -13,7 +13,7 @@
  * receiver class has no `methodName`, walk its fields and try the
  * lookup on each field's type. Useful for dynamically-typed languages
  * (Python). Strictly-typed languages should pass
- * `fieldFallbackOnMethodLookup: false` via `EmitProvider`.
+ * `fieldFallbackOnMethodLookup: false` via `ScopeResolver`.
  *
  * Generic for any C-family language (`.` member access, `()` call
  * syntax). Languages with non-C-family syntax (Ruby blocks, COBOL)
@@ -22,12 +22,12 @@
 
 import type { ParsedFile, ScopeId, SymbolDefinition, TypeRef } from 'gitnexus-shared';
 import type { Scope } from 'gitnexus-shared';
-import type { ScopeResolutionIndexes } from '../model/scope-resolution-indexes.js';
+import type { ScopeResolutionIndexes } from '../../model/scope-resolution-indexes.js';
 import {
   findClassBindingInScope,
   findExportedDefByName,
   findReceiverTypeBinding,
-} from './scope-walkers.js';
+} from '../scope/walkers.js';
 
 /** Max depth for compound-receiver chain resolution (`a().b().c().d()`).
  *  Practical code rarely exceeds 3-4 hops; the cap prevents

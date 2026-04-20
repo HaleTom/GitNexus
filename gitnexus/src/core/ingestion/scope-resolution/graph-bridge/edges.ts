@@ -16,10 +16,10 @@
  */
 
 import type { Reference, ScopeId, SymbolDefinition } from 'gitnexus-shared';
-import type { KnowledgeGraph } from '../../graph/types.js';
-import type { ScopeResolutionIndexes } from '../model/scope-resolution-indexes.js';
-import type { GraphNodeLookup } from './graph-node-lookup.js';
-import { resolveCallerGraphId, resolveDefGraphId } from './graph-id.js';
+import type { KnowledgeGraph } from '../../../graph/types.js';
+import type { ScopeResolutionIndexes } from '../../model/scope-resolution-indexes.js';
+import type { GraphNodeLookup } from '../graph-bridge/node-lookup.js';
+import { resolveCallerGraphId, resolveDefGraphId } from '../graph-bridge/ids.js';
 
 /**
  * Map a `Reference.kind` to a graph edge type. `import-use` is dropped

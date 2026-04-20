@@ -13,7 +13,7 @@
  */
 
 import type { NodeLabel } from 'gitnexus-shared';
-import type { KnowledgeGraph } from '../../graph/types.js';
+import type { KnowledgeGraph } from '../../../graph/types.js';
 
 export type GraphNodeLookup = ReadonlyMap<string, string>;
 

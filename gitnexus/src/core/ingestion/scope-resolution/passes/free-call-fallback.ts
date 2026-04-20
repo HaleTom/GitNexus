@@ -13,16 +13,16 @@
  * dedup semantics (what the `default-params` / `variadic` / `overload`
  * fixtures expect). Member calls keep position-based dedup elsewhere.
  *
- * Generic; promoted from `python-scope-emit.ts` per the emit-core
+ * Generic; promoted from `languages/python/scope-resolver.ts` per the scope-resolution
  * generalization plan.
  */
 
 import type { ParsedFile, Reference, ScopeId } from 'gitnexus-shared';
-import type { KnowledgeGraph } from '../../graph/types.js';
-import type { ScopeResolutionIndexes } from '../model/scope-resolution-indexes.js';
-import type { GraphNodeLookup } from './graph-node-lookup.js';
-import { resolveCallerGraphId, resolveDefGraphId } from './graph-id.js';
-import { findCallableBindingInScope } from './scope-walkers.js';
+import type { KnowledgeGraph } from '../../../graph/types.js';
+import type { ScopeResolutionIndexes } from '../../model/scope-resolution-indexes.js';
+import type { GraphNodeLookup } from '../graph-bridge/node-lookup.js';
+import { resolveCallerGraphId, resolveDefGraphId } from '../graph-bridge/ids.js';
+import { findCallableBindingInScope } from '../scope/walkers.js';
 
 export function emitFreeCallFallback(
   graph: KnowledgeGraph,

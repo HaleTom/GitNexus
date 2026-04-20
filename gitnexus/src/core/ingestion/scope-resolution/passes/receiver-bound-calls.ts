@@ -1,6 +1,6 @@
 /**
  * Receiver-bound CALLS / ACCESSES emit pass — generic 7-case
- * dispatcher consuming `EmitProvider` for the language-specific bits
+ * dispatcher consuming `ScopeResolver` for the language-specific bits
  * (super recognizer, field-fallback toggle).
  *
  * **Contract Invariant I4 — case order is load-bearing.** The cases
@@ -31,26 +31,26 @@
 
 import type { ParsedFile, SymbolDefinition } from 'gitnexus-shared';
 import type { Scope } from 'gitnexus-shared';
-import type { KnowledgeGraph } from '../../graph/types.js';
-import type { ScopeResolutionIndexes } from '../model/scope-resolution-indexes.js';
-import type { EmitProvider } from './emit-provider.js';
-import type { GraphNodeLookup } from './graph-node-lookup.js';
-import { collectNamespaceTargets } from './namespace-targets.js';
+import type { KnowledgeGraph } from '../../../graph/types.js';
+import type { ScopeResolutionIndexes } from '../../model/scope-resolution-indexes.js';
+import type { ScopeResolver } from '../contract/scope-resolver.js';
+import type { GraphNodeLookup } from '../graph-bridge/node-lookup.js';
+import { collectNamespaceTargets } from '../scope/namespace-targets.js';
 import {
   findClassBindingInScope,
   findEnclosingClassDef,
   findExportedDef,
   findOwnedMember,
   findReceiverTypeBinding,
-} from './scope-walkers.js';
-import { tryEmitEdge } from './emit-edge.js';
-import { resolveCompoundReceiverClass } from './emit-compound-receiver.js';
+} from '../scope/walkers.js';
+import { tryEmitEdge } from '../graph-bridge/edges.js';
+import { resolveCompoundReceiverClass } from '../passes/compound-receiver.js';
 
-/** Subset of `EmitProvider` consumed by this pass. Accepting the
+/** Subset of `ScopeResolver` consumed by this pass. Accepting the
  *  subset rather than the full provider keeps tests and partial
  *  refactors lighter — callers only need to populate what we read. */
 export type ReceiverBoundProviderSubset = Pick<
-  EmitProvider,
+  ScopeResolver,
   'isSuperReceiver' | 'fieldFallbackOnMethodLookup'
 >;
 
