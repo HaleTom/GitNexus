@@ -103,3 +103,6 @@ gitnexus/vendor/**/node_modules/
 
 local_docs/
 
+# Local agent scratch / review prompts (never commit)
+.tmp/
+.agents/

@@ -19,7 +19,6 @@ import {
   executeQuery,
   executeWithReusedStatement,
   closeLbug,
-  createFTSIndex,
   loadCachedEmbeddings,
 } from './lbug/lbug-adapter.js';
 import {
@@ -30,7 +29,7 @@ import {
   registerRepo,
   cleanupOldKuzuFiles,
 } from '../storage/repo-manager.js';
-import { getCurrentCommit, hasGitDir } from '../storage/git.js';
+import { getCurrentCommit, hasGitDir, getInferredRepoName } from '../storage/git.js';
 import type { CachedEmbedding } from './embeddings/types.js';
 import { generateAIContextFiles } from '../cli/ai-context.js';
 import { EMBEDDING_TABLE_NAME } from './lbug/schema.js';
@@ -46,6 +45,12 @@ export interface AnalyzeCallbacks {
 }
 
 export interface AnalyzeOptions {
+  /**
+   * Force a full re-index of the pipeline. Callers may OR this with
+   * other flags that imply re-analysis (e.g. `--skills`), so the value
+   * here is the PIPELINE-force signal, NOT the registry-collision
+   * bypass. See `allowDuplicateName` below.
+   */
   force?: boolean;
   embeddings?: boolean;
   skipGit?: boolean;
@@ -53,6 +58,21 @@ export interface AnalyzeOptions {
   skipAgentsMd?: boolean;
   /** Omit volatile symbol/relationship counts from AGENTS.md and CLAUDE.md. */
   noStats?: boolean;
+  /**
+   * User-provided alias for the registry `name` (#829). When set,
+   * forwarded to `registerRepo` so the indexed repo is stored under
+   * this alias instead of the path-derived basename.
+   */
+  registryName?: string;
+  /**
+   * Bypass the `RegistryNameCollisionError` guard and allow two paths
+   * to register under the same `name` (#829). Controlled by the
+   * dedicated `--allow-duplicate-name` CLI flag, intentionally
+   * independent from `--force` — users who hit the collision guard
+   * should be able to accept the duplicate without paying the cost
+   * of a pipeline re-index.
+   */
+  allowDuplicateName?: boolean;
 }
 
 export interface AnalyzeResult {
@@ -131,7 +151,7 @@ export async function runFullAnalysis(
     // Non-git folders have currentCommit = '' — always rebuild since we can't detect changes
     if (currentCommit !== '') {
       return {
-        repoName: path.basename(repoPath),
+        repoName: options.registryName ?? getInferredRepoName(repoPath) ?? path.basename(repoPath),
         repoPath,
         stats: existingMeta.stats ?? {},
         alreadyUpToDate: true,
@@ -194,17 +214,12 @@ export async function runFullAnalysis(
     });
 
     // ── Phase 3: FTS (85–90%) ─────────────────────────────────────────
-    progress('fts', 85, 'Creating search indexes...');
-
-    try {
-      await createFTSIndex('File', 'file_fts', ['name', 'content']);
-      await createFTSIndex('Function', 'function_fts', ['name', 'content']);
-      await createFTSIndex('Class', 'class_fts', ['name', 'content']);
-      await createFTSIndex('Method', 'method_fts', ['name', 'content']);
-      await createFTSIndex('Interface', 'interface_fts', ['name', 'content']);
-    } catch {
-      // Non-fatal — FTS is best-effort
-    }
+    // FTS indexes are created lazily on first `query`/`context` call instead
+    // of eagerly here. On small repos / CI runners the LadybugDB
+    // CREATE_FTS_INDEX cost is ~440 ms × 5 (≈2 s) regardless of table size,
+    // which dominated `analyze` runtime and pushed Windows CI past its
+    // 30 s test budget. Lazy creation is implemented in
+    // `core/search/bm25-index.ts` via `ensureFTSIndex`.
 
     // ── Phase 3.5: Re-insert cached embeddings ────────────────────────
     if (cachedEmbeddings.length > 0) {
@@ -313,14 +328,24 @@ export async function runFullAnalysis(
       },
     };
     await saveMeta(storagePath, meta);
-    await registerRepo(repoPath, meta);
+    // Forward the --name alias and the registry-collision bypass bit.
+    // `allowDuplicateName` is its own concern — independent from the
+    // pipeline `force` above. The CLI maps it from
+    // `--allow-duplicate-name` only; `--force` and `--skills` both
+    // trigger pipeline re-run but never bypass the registry guard.
+    // The returned name is the one actually written to the registry
+    // (after applying the precedence chain in registerRepo) — reuse it
+    // so AGENTS.md / skill files reference the same name MCP clients
+    // will look up (#979).
+    const projectName = await registerRepo(repoPath, meta, {
+      name: options.registryName,
+      allowDuplicateName: options.allowDuplicateName,
+    });
 
     // Only attempt to update .gitignore when a .git directory is present.
     if (hasGitDir(repoPath)) {
       await addToGitignore(repoPath);
     }
-
-    const projectName = path.basename(repoPath);
 
     // ── Generate AI context files (best-effort) ───────────────────────
     let aggregatedClusterCount = 0;

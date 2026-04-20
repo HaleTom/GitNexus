@@ -9,7 +9,7 @@
 
   <h2>Join the official Discord to discuss ideas, issues etc!</h2>
 
-  <a href="https://discord.gg/AAsRVT6fGb">
+  <a href="https://discord.gg/MgJrmsqr62">
     <img src="https://img.shields.io/discord/1477255801545429032?color=5865F2&logo=discord&logoColor=white" alt="Discord"/>
   </a>
   <a href="https://www.npmjs.com/package/gitnexus">
@@ -194,6 +194,7 @@ gitnexus analyze --force         # Force full re-index
 gitnexus analyze --skills        # Generate repo-specific skill files from detected communities
 gitnexus analyze --skip-embeddings  # Skip embedding generation (faster)
 gitnexus analyze --skip-agents-md  # Preserve custom AGENTS.md/CLAUDE.md gitnexus section edits
+gitnexus analyze --skip-git        # Index folders that are not Git repositories
 gitnexus analyze --embeddings    # Enable embedding generation (slower, better search)
 gitnexus analyze --verbose       # Log skipped files when parsers are unavailable
 gitnexus mcp                     # Start MCP server (stdio) — serves all indexed repos
@@ -400,11 +401,14 @@ docker compose --env-file .env up -d
 
 The Docker images are version-locked to the npm package:
 
-- Both images are **only published from `vX.Y.Z` git tags**, and the workflow
-  refuses to build unless the tag exactly matches `gitnexus/package.json`'s
-  version. So `ghcr.io/abhigyanpatwari/gitnexus:1.6.2` is byte-for-byte the
-  same release as `npm install gitnexus@1.6.2` — no drift, no floating
-  builds from `main`.
+- Stable images are **only published from `vX.Y.Z` git tags** (via `docker.yml`
+  triggered directly by the tag push), and the workflow refuses to build unless
+  the tag exactly matches `gitnexus/package.json`'s version. So
+  `ghcr.io/abhigyanpatwari/gitnexus:1.6.2` is byte-for-byte the same release
+  as `npm install gitnexus@1.6.2` — no drift, no floating builds from `main`.
+- Release-candidate images (e.g. `:1.7.0-rc.1`) are published alongside each
+  RC npm release. They are built by `release-candidate.yml` calling `docker.yml`
+  as a reusable workflow after the RC tag is created and pushed.
 - `:latest` is auto-promoted only from non-prerelease tags by the Docker
   metadata action, so it always points at a real, npm-published version.
 
@@ -416,6 +420,8 @@ typo-squatted registry), they cannot forge a Cosign signature tied to
 `abhigyanpatwari/GitNexus`'s `docker.yml`. Always verify before pulling into
 sensitive environments:
 
+**Stable releases** — signed from the `v*` tag ref:
+
 ```bash
 cosign verify ghcr.io/abhigyanpatwari/gitnexus:1.6.2 \
   --certificate-identity-regexp '^https://github\.com/abhigyanpatwari/GitNexus/\.github/workflows/docker\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$' \
@@ -425,6 +431,15 @@ cosign verify ghcr.io/abhigyanpatwari/gitnexus:1.6.2 \
 The regex pins the certificate identity to this repo's `docker.yml` workflow
 **run from a `v*` tag** — rejecting unsigned images, images signed by other
 workflows, and images signed from unprotected refs.
+
+**Release candidates** — signed from `refs/heads/main` (the caller's ref when
+`release-candidate.yml` invokes `docker.yml` as a reusable workflow):
+
+```bash
+cosign verify ghcr.io/abhigyanpatwari/gitnexus:1.7.0-rc.1 \
+  --certificate-identity 'https://github.com/abhigyanpatwari/GitNexus/.github/workflows/docker.yml@refs/heads/main' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
 
 You can also inspect the build provenance and SBOM:
 

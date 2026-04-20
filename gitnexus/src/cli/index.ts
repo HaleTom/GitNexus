@@ -28,6 +28,16 @@ program
   .option('--skip-agents-md', 'Skip updating the gitnexus section in AGENTS.md and CLAUDE.md')
   .option('--no-stats', 'Omit volatile file/symbol counts from AGENTS.md and CLAUDE.md')
   .option('--skip-git', 'Index a folder without requiring a .git directory')
+  .option(
+    '--name <alias>',
+    'Register this repo under a custom name in ~/.gitnexus/registry.json ' +
+      '(disambiguates repos whose paths share a basename, e.g. two different .../app folders)',
+  )
+  .option(
+    '--allow-duplicate-name',
+    'Register this repo even if another path already uses the same --name alias. ' +
+      'Leaves `-r <name>` ambiguous for the two paths; use -r <path> to disambiguate.',
+  )
   .option('-v, --verbose', 'Enable verbose ingestion warnings (default: false)')
   .addHelpText(
     'after',
@@ -140,6 +150,15 @@ program
   .description('Execute raw Cypher query against the knowledge graph')
   .option('-r, --repo <name>', 'Target repository')
   .action(createLazyAction(() => import('./tool.js'), 'cypherCommand'));
+
+program
+  .command('detect-changes')
+  .alias('detect_changes')
+  .description('Map git diff hunks to indexed symbols and affected execution flows')
+  .option('-s, --scope <scope>', 'What to analyze: unstaged, staged, all, or compare', 'unstaged')
+  .option('-b, --base-ref <ref>', 'Branch/commit for compare scope (e.g. main)')
+  .option('-r, --repo <name>', 'Target repository')
+  .action(createLazyAction(() => import('./tool.js'), 'detectChangesCommand'));
 
 // ─── Eval Server (persistent daemon for SWE-bench) ─────────────────
 
