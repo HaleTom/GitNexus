@@ -125,6 +125,18 @@
   left: (identifier) @type-binding.name
   type: (type) @type-binding.type) @type-binding.annotation
 
+; ─── Type bindings: function return-type annotations ─────────────────────
+;
+; `def get_user() -> User:` — binds the function's NAME to its return
+; type in the enclosing scope. Combined with the constructor-inferred +
+; chain-follow path, `u = get_user()` then resolves `u: User` cross-
+; call. Python provider hoists the binding via `pythonBindingScopeFor`
+; to the function's parent scope so callers in module/class scope see it.
+
+(function_definition
+  name: (identifier) @type-binding.name
+  return_type: (type) @type-binding.type) @type-binding.return
+
 ; ─── References: calls ─────────────────────────────────────────────────────
 ;
 ; Free call:   `print(x)`     — function is a bare identifier

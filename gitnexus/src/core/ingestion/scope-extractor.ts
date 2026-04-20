@@ -666,9 +666,19 @@ function pass4CollectTypeBindings(
     const innermost = draftById.get(innermostId);
     if (innermost === undefined) continue;
 
+    // Auto-hoist for scope-creating type bindings (e.g. Python's
+    // `@type-binding.return` whose anchor is the function_definition
+    // itself). Same condition as Pass 2 — when the anchor coincides
+    // with the innermost scope's range, the binding belongs in the
+    // enclosing scope (callers, not the function body, look up the
+    // return type by the function's name).
+    const autoHostedId =
+      innermost.parent !== null && rangesEqual(anchor.range, innermost.range)
+        ? innermost.parent
+        : innermost.id;
     // `bindingScopeFor` may hoist the type binding to an outer scope.
     const hostId =
-      provider.bindingScopeFor?.(match, draftToScope(innermost), scopeTree) ?? innermost.id;
+      provider.bindingScopeFor?.(match, draftToScope(innermost), scopeTree) ?? autoHostedId;
     const host = draftById.get(hostId) ?? innermost;
 
     const typeRef: TypeRef = {

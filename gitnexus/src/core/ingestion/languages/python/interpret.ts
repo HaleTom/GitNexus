@@ -122,6 +122,7 @@ export function interpretPythonTypeBinding(captures: CaptureMatch): ParsedTypeBi
   else if (captures['@type-binding.constructor'] !== undefined) source = 'constructor-inferred';
   else if (captures['@type-binding.annotation'] !== undefined) source = 'annotation';
   else if (captures['@type-binding.alias'] !== undefined) source = 'assignment-inferred';
+  else if (captures['@type-binding.return'] !== undefined) source = 'return-annotation';
 
   return { boundName: nameCap.text, rawTypeName: rawType, source };
 }

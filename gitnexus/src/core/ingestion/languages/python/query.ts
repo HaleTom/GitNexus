@@ -113,6 +113,16 @@ export const PYTHON_SCOPE_QUERY = `
   left: (identifier) @type-binding.name
   type: (type) @type-binding.type) @type-binding.annotation
 
+;; Return-type annotation: \`def get_user() -> User:\` binds the
+;; FUNCTION'S NAME to its return type in the enclosing scope. Combined
+;; with the constructor-inferred + chain-follow path, \`u = get_user()\`
+;; then resolves \`u: User\` cross-call. The Python provider hoists the
+;; binding via \`pythonBindingScopeFor\` to the function's parent scope
+;; so callers in module/class scope see it.
+(function_definition
+  name: (identifier) @type-binding.name
+  return_type: (type) @type-binding.type) @type-binding.return
+
 ;; References — calls
 (call
   function: (identifier) @reference.name) @reference.call.free
