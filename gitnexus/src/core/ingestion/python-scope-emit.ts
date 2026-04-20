@@ -360,29 +360,18 @@ function emitReceiverBoundCalls(
       const receiverName = site.explicitReceiver.name;
       const memberName = site.name;
 
-      // ── Case 0: dotted receiver (`user.address.save()`) ──────────
-      // Walk the dotted chain via class-scope typeBindings (fields).
-      if (receiverName.includes('.')) {
-        const parts = receiverName.split('.');
-        const head = parts[0]!;
-        const headType = findReceiverTypeBinding(site.inScope, head, scopes);
-        let currentClass: SymbolDefinition | undefined = headType
-          ? findClassBindingInScope(headType.declaredAtScope, headType.rawName, scopes)
-          : undefined;
-        for (let i = 1; i < parts.length && currentClass !== undefined; i++) {
-          const fieldName = parts[i]!;
-          const cs = classScopeByDefId.get(currentClass.nodeId);
-          const fieldType = cs?.typeBindings.get(fieldName);
-          if (fieldType === undefined) {
-            currentClass = undefined;
-            break;
-          }
-          currentClass = findClassBindingInScope(
-            fieldType.declaredAtScope,
-            fieldType.rawName,
-            scopes,
-          );
-        }
+      // ── Case 0: compound receiver (`user.address.save()` or
+      //   `svc.get_user().save()`) — walk the dotted/call chain,
+      //   resolving each segment to a class via field types or
+      //   method return types.
+      if (receiverName.includes('.') || receiverName.includes('(')) {
+        const currentClass = resolveCompoundReceiverClass(
+          receiverName,
+          site.inScope,
+          scopes,
+          parsedFiles,
+          classScopeByDefId,
+        );
         if (currentClass !== undefined) {
           const chain = [currentClass.nodeId, ...scopes.methodDispatch.mroFor(currentClass.nodeId)];
           let memberDef: SymbolDefinition | undefined;
@@ -397,7 +386,7 @@ function emitReceiverBoundCalls(
               nodeLookup,
               site,
               memberDef,
-              'python-scope: field-chain',
+              'python-scope: chain-receiver',
               seen,
             );
             if (ok) emitted++;
@@ -505,6 +494,166 @@ function emitReceiverBoundCalls(
   }
 
   return emitted;
+}
+
+/** Max depth for compound-receiver chain resolution (`a().b().c().d()`).
+ *  Practical Python rarely exceeds 3-4 hops; the cap just prevents
+ *  pathological recursion if the receiver text turns out to be malformed. */
+const COMPOUND_RECEIVER_MAX_DEPTH = 4;
+
+/**
+ * Resolve a compound-receiver expression's TYPE (the class def of the
+ * value it produces). Handles three shapes:
+ *   - bare identifier `name` — look up via typeBinding chain
+ *   - dotted `obj.field[.field]…` — walk fields via class-scope typeBindings
+ *   - call `expr.method()` — recurse into expr, find method's return-type
+ *     typeBinding on its class, resolve to a class
+ *
+ * Returns the class `SymbolDefinition` or undefined if the chain dead-ends.
+ * Depth-capped at COMPOUND_RECEIVER_MAX_DEPTH.
+ */
+function resolveCompoundReceiverClass(
+  receiverText: string,
+  inScope: ScopeId,
+  scopes: ScopeResolutionIndexes,
+  parsedFiles: readonly ParsedFile[],
+  classScopeByDefId: ReadonlyMap<string, Scope>,
+  depth = 0,
+): SymbolDefinition | undefined {
+  if (depth > COMPOUND_RECEIVER_MAX_DEPTH) return undefined;
+  const text = receiverText.trim();
+  if (text.length === 0) return undefined;
+
+  // Bare identifier — resolve via typeBinding then class lookup.
+  if (!text.includes('.') && !text.includes('(')) {
+    const tb = findReceiverTypeBinding(inScope, text, scopes);
+    if (tb === undefined) return undefined;
+    return findClassBindingInScope(tb.declaredAtScope, tb.rawName, scopes);
+  }
+
+  // Trailing `()` — call expression. Strip it and resolve the function
+  // expression's return type. We only handle the canonical `f()` /
+  // `obj.method()` shape; nested-arg expressions like `f(g())` are
+  // out of scope for V1 (depth-capped recursion catches infinite loops).
+  if (text.endsWith(')')) {
+    // Find the matching `(` by walking from end with a depth counter
+    // so nested parens in args don't fool us.
+    const openIdx = matchingOpenParen(text);
+    if (openIdx === -1) return undefined;
+    const fnExpr = text.slice(0, openIdx).trim();
+    if (fnExpr.length === 0) return undefined;
+
+    // Split into receiver and method name on the LAST dot.
+    const lastDot = fnExpr.lastIndexOf('.');
+    if (lastDot === -1) {
+      // Free call `name()`. Look up function in scope, then its
+      // return-type typeBinding (which lives in the function's
+      // enclosing scope per Pass 4 hoist).
+      const fnDef = findExportedDefByName(fnExpr, inScope, scopes, parsedFiles);
+      if (fnDef === undefined) return undefined;
+      // The return-type binding key == the function's simple name in
+      // the scope where the function is bound. Walk for it.
+      const retType = findReceiverTypeBinding(inScope, fnExpr, scopes);
+      if (retType === undefined) return undefined;
+      return findClassBindingInScope(retType.declaredAtScope, retType.rawName, scopes);
+    }
+    // `obj.method()` — resolve obj's class, look up method, then its
+    // return-type typeBinding on that class scope.
+    const objExpr = fnExpr.slice(0, lastDot);
+    const methodName = fnExpr.slice(lastDot + 1);
+    const objClass = resolveCompoundReceiverClass(
+      objExpr,
+      inScope,
+      scopes,
+      parsedFiles,
+      classScopeByDefId,
+      depth + 1,
+    );
+    if (objClass === undefined) return undefined;
+    const methodClassScope = classScopeByDefId.get(objClass.nodeId);
+    // Method's return-type binding lives on the class scope (because
+    // the method's function_definition auto-hoists its return-type
+    // binding to the parent scope == class scope).
+    const retType = methodClassScope?.typeBindings.get(methodName);
+    if (retType === undefined) return undefined;
+    return findClassBindingInScope(retType.declaredAtScope, retType.rawName, scopes);
+  }
+
+  // Pure dotted access `obj.field[.field]…` — walk fields.
+  const parts = text.split('.');
+  const head = parts[0]!;
+  const headType = findReceiverTypeBinding(inScope, head, scopes);
+  let currentClass: SymbolDefinition | undefined = headType
+    ? findClassBindingInScope(headType.declaredAtScope, headType.rawName, scopes)
+    : undefined;
+  for (let i = 1; i < parts.length && currentClass !== undefined; i++) {
+    const fieldName = parts[i]!;
+    const cs = classScopeByDefId.get(currentClass.nodeId);
+    const fieldType = cs?.typeBindings.get(fieldName);
+    if (fieldType === undefined) return undefined;
+    currentClass = findClassBindingInScope(fieldType.declaredAtScope, fieldType.rawName, scopes);
+  }
+  return currentClass;
+}
+
+/** Find the index of the `(` that matches the trailing `)` of a
+ *  call-expression text. Returns -1 if unbalanced. */
+function matchingOpenParen(text: string): number {
+  if (!text.endsWith(')')) return -1;
+  let depth = 0;
+  for (let i = text.length - 1; i >= 0; i--) {
+    const ch = text[i];
+    if (ch === ')') depth++;
+    else if (ch === '(') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/** Look up a free-function def by simple name across all parsed files
+ *  whose scope chain from `inScope` includes the binding. Used by the
+ *  free-call branch of `resolveCompoundReceiverClass`. */
+function findExportedDefByName(
+  name: string,
+  inScope: ScopeId,
+  scopes: ScopeResolutionIndexes,
+  parsedFiles: readonly ParsedFile[],
+): SymbolDefinition | undefined {
+  // Walk the call site's scope chain looking for a binding.
+  let currentId: ScopeId | null = inScope;
+  const visited = new Set<ScopeId>();
+  while (currentId !== null) {
+    if (visited.has(currentId)) break;
+    visited.add(currentId);
+    const scope = scopes.scopeTree.getScope(currentId);
+    if (scope === undefined) break;
+    const local = scope.bindings.get(name);
+    if (local !== undefined) {
+      for (const b of local) {
+        if (b.def.type === 'Function' || b.def.type === 'Method') return b.def;
+      }
+    }
+    const finalized = scopes.bindings.get(currentId)?.get(name);
+    if (finalized !== undefined) {
+      for (const b of finalized) {
+        if (b.def.type === 'Function' || b.def.type === 'Method') return b.def;
+      }
+    }
+    currentId = scope.parent;
+  }
+  // Fallback: scan parsed files for any matching simple-name def.
+  for (const f of parsedFiles) {
+    for (const def of f.localDefs) {
+      if (def.type !== 'Function' && def.type !== 'Method') continue;
+      const qn = def.qualifiedName;
+      if (qn === undefined) continue;
+      const simple = qn.lastIndexOf('.') === -1 ? qn : qn.slice(qn.lastIndexOf('.') + 1);
+      if (simple === name) return def;
+    }
+  }
+  return undefined;
 }
 
 /**
