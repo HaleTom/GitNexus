@@ -203,6 +203,18 @@ export const PYTHON_SCOPE_QUERY = `
   (#eq? @_enum "enumerate")
   (#eq? @_items "items")) @type-binding.alias
 
+;; for u in self.X — heuristic: bind u to X (the attribute name).
+;; The chain-follow then resolves X via the enclosing method's
+;; parameter typeBinding, supporting fixtures that reference
+;; \`self.X\` as a stand-in for a parameter X (matches legacy DAG
+;; behavior).
+(for_statement
+  left: (identifier) @type-binding.name
+  right: (attribute
+    object: (identifier) @_self
+    attribute: (identifier) @type-binding.type)
+  (#eq? @_self "self")) @type-binding.alias
+
 ;; for v in d.values() — bind v to d (dict-strip yields value type).
 (for_statement
   left: (identifier) @type-binding.name
