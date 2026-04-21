@@ -350,7 +350,9 @@ async function setupOpenCode(result: SetupResult): Promise<void> {
     if (ok) {
       result.configured.push('OpenCode');
     } else {
-      result.errors.push('OpenCode: opencode.json is corrupt — skipping to preserve existing content');
+      result.errors.push(
+        'OpenCode: opencode.json is corrupt — skipping to preserve existing content',
+      );
     }
   } catch (err: any) {
     result.errors.push(`OpenCode: ${err.message}`);
