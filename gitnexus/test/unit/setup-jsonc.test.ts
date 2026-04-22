@@ -567,4 +567,25 @@ describe('installClaudeCodeHooks — JSONC preservation', () => {
     const raw = await fs.readFile(settingsPath(), 'utf-8');
     expect(raw).toBe(corrupt);
   });
+
+  it('handles idempotency check with JSONC comments in settings', async () => {
+    const jsonc = `{
+  // settings comment
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "Grep|Glob|Bash", "hooks": [{ "type": "command", "command": "other-hook" }] }
+    ]
+  }
+}`;
+    await fs.writeFile(settingsPath(), jsonc, 'utf-8');
+
+    const { setupCommand } = await import('../../src/cli/setup.js');
+    await setupCommand();
+
+    const raw = await fs.readFile(settingsPath(), 'utf-8');
+    expect(raw).toContain('settings comment');
+    const config = parseJsonc(raw);
+    expect(config.hooks.PreToolUse.length).toBe(2);
+    expect(config.hooks.PostToolUse.length).toBe(1);
+  });
 });

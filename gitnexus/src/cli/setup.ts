@@ -13,7 +13,7 @@ import { execFile, execFileSync } from 'child_process';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
 import { glob } from 'glob';
-import { parseTree, modify, applyEdits, ParseError } from 'jsonc-parser';
+import { parseTree, modify, applyEdits, ParseError, parse as parseJsonc } from 'jsonc-parser';
 import { getGlobalDir } from '../storage/repo-manager.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -272,7 +272,9 @@ async function mergeHooksJsonc(
   let current = raw;
 
   for (const { eventName, value } of entries) {
-    const hooksNode = tree.children?.find(
+    // Re-parse after each edit to get a fresh insertion index.
+    const currentTree = parseTree(current, []);
+    const hooksNode = currentTree?.children?.find(
       (c) => c.type === 'property' && c.children?.[0]?.value === 'hooks',
     );
     const eventNode = hooksNode?.children?.[1]?.children?.find(
@@ -339,7 +341,7 @@ async function installClaudeCodeHooks(result: SetupResult): Promise<void> {
     const parsed = await (async () => {
       try {
         const r = await fs.readFile(settingsPath, 'utf-8');
-        return JSON.parse(r);
+        return parseJsonc(r);
       } catch {
         return null;
       }
