@@ -129,9 +129,19 @@ async function writeJsonFile(filePath: string, data: any): Promise<void> {
 }
 
 /**
+ * Detect indentation style from file content.
+ * Returns formatting options matching the file's existing style.
+ */
+function detectIndentation(raw: string): { tabSize: number; insertSpaces: boolean } {
+  const firstIndented = raw.match(/^( +|\t)/m);
+  if (!firstIndented) return { tabSize: 2, insertSpaces: true };
+  if (firstIndented[1] === '\t') return { tabSize: 1, insertSpaces: false };
+  return { tabSize: firstIndented[1].length, insertSpaces: true };
+}
+
+/**
  * Merge a key/value pair into a JSONC config file, preserving comments and formatting.
- * Falls back to JSON.parse + writeJsonFile for valid JSON that is not valid JSONC.
- * If the file is genuinely corrupt (not valid JSON or JSONC), leaves it untouched.
+ * If the file is genuinely corrupt (not valid JSONC), leaves it untouched.
  */
 async function mergeJsoncFile(
   filePath: string,
@@ -164,29 +174,14 @@ async function mergeJsoncFile(
   const tree = parseTree(raw, parseErrors);
 
   if (tree && tree.type === 'object' && parseErrors.length === 0) {
-    const detectedTabs = /^\t/m.test(raw);
-    const formattingOptions = detectedTabs
-      ? { tabSize: 1, insertSpaces: false }
-      : { tabSize: 2, insertSpaces: true };
+    const formattingOptions = detectIndentation(raw);
     const edits = modify(raw, keyPath, value, { formattingOptions });
     const result = applyEdits(raw, edits);
     await fs.writeFile(filePath, result, 'utf-8');
     return true;
   }
 
-  try {
-    const existing = JSON.parse(raw);
-    let parent = existing;
-    for (let i = 0; i < keyPath.length - 1; i++) {
-      if (!parent[keyPath[i]]) parent[keyPath[i]] = {};
-      parent = parent[keyPath[i]];
-    }
-    parent[keyPath[keyPath.length - 1]] = value;
-    await writeJsonFile(filePath, existing);
-    return true;
-  } catch {
-    return false;
-  }
+  return false;
 }
 
 /**

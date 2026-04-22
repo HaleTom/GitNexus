@@ -236,6 +236,32 @@ describe('setupOpenCode — JSONC preservation', () => {
     });
   });
 
+  it('preserves tab indentation in existing file', async () => {
+    const tabbed = `{\n\t"model": "test"\n}`;
+    await fs.writeFile(opencodeJsonPath(), tabbed, 'utf-8');
+
+    const { setupCommand } = await import('../../src/cli/setup.js');
+    await setupCommand();
+
+    const raw = await fs.readFile(opencodeJsonPath(), 'utf-8');
+    expect(raw).toContain('\t"model"');
+    expect(raw).toContain('\t"gitnexus"');
+  });
+
+  it('preserves 4-space indentation in existing file', async () => {
+    const fourSpace = `{
+    "model": "test"
+}`;
+    await fs.writeFile(opencodeJsonPath(), fourSpace, 'utf-8');
+
+    const { setupCommand } = await import('../../src/cli/setup.js');
+    await setupCommand();
+
+    const raw = await fs.readFile(opencodeJsonPath(), 'utf-8');
+    const mcpLine = raw.split('\n').find((l) => l.includes('"gitnexus"'));
+    expect(mcpLine).toMatch(/^    /);
+  });
+
   it('skips when ~/.config/opencode directory does not exist', async () => {
     await fs.rm(opencodeDir(), { recursive: true, force: true });
 
