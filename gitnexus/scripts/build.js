@@ -70,8 +70,6 @@ walk(DIST, ['.js', '.d.ts'], rewriteFile);
 const cliEntry = path.join(DIST, 'cli', 'index.js');
 if (fs.existsSync(cliEntry)) fs.chmodSync(cliEntry, 0o755);
 
-console.log(`[build] done — rewrote ${rewritten} files.`);
-
 // ── 6. Build & copy web UI ──────────────────────────────────────────
 const WEB_ROOT = path.resolve(ROOT, '..', 'gitnexus-web');
 const WEB_DEST = path.join(DIST, '..', 'web');
@@ -87,3 +85,5 @@ if (fs.existsSync(path.join(WEB_ROOT, 'package.json'))) {
 } else {
   console.log('[build] skipping web UI (gitnexus-web not found)');
 }
+
+console.log(`[build] done — rewrote ${rewritten} files.`);

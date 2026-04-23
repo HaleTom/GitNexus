@@ -1575,8 +1575,8 @@ export const createServer = async (port: number, host: string = '127.0.0.1') => 
 
   if (staticDir) {
     app.use(express.static(staticDir));
-    // SPA fallback: any non-API route serves index.html
-    app.get('*', (_req, res) => {
+    // SPA fallback: non-API routes serve index.html; API paths fall through to 404
+    app.get(/^(?!\/api(?:\/|$)).*/, (_req, res) => {
       res.sendFile(path.join(staticDir!, 'index.html'));
     });
   } else {
@@ -1608,7 +1608,7 @@ export const createServer = async (port: number, host: string = '127.0.0.1') => 
 <h3>Web UI not found</h3>
 <p>The built web UI was not found. To enable it, build the frontend:</p>
 <pre><code>cd gitnexus-web && npm run build</code></pre>
-<p>Or use the deployed UI at <a href="https://gitnexus.vercel.app" target="_blank">gitnexus.vercel.app</a> — it connects to this server automatically.</p>
+<p>Or use the deployed UI at <a href="https://gitnexus.vercel.app" target="_blank" rel="noopener noreferrer">gitnexus.vercel.app</a> — it connects to this server automatically.</p>
 </body>
 </html>`);
     });
