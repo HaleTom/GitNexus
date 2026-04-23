@@ -1553,6 +1553,67 @@ export const createServer = async (port: number, host: string = '127.0.0.1') => 
     res.json({ id: job.id, status: 'failed', error: 'Cancelled by user' });
   });
 
+  // ── Web UI (served at root) ───────────────────────────────────────
+
+  // Resolve the gitnexus-web dist directory relative to this file's location.
+  // In the published package: <pkg>/dist/server/api.js → <pkg>/web/
+  // In dev (tsx):            gitnexus/src/server/api.ts → gitnexus-web/dist/
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const webDistDir = path.resolve(__dirname, '..', '..', 'web');
+  const devWebDistDir = path.resolve(__dirname, '..', '..', '..', 'gitnexus-web', 'dist');
+  let staticDir: string | null = null;
+  try {
+    await fs.access(path.join(webDistDir, 'index.html'));
+    staticDir = webDistDir;
+  } catch {}
+  if (!staticDir) {
+    try {
+      await fs.access(path.join(devWebDistDir, 'index.html'));
+      staticDir = devWebDistDir;
+    } catch {}
+  }
+
+  if (staticDir) {
+    app.use(express.static(staticDir));
+    // SPA fallback: any non-API route serves index.html
+    app.get('*', (_req, res) => {
+      res.sendFile(path.join(staticDir!, 'index.html'));
+    });
+  } else {
+    // No built web UI found — serve a helpful landing page
+    app.get('/', (_req, res) => {
+      res.type('html').send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GitNexus</title>
+<style>
+  body{font-family:system-ui,-apple-system,sans-serif;max-width:640px;margin:2rem auto;padding:0 1rem;color:#e0e0e0;background:#1a1a2e}
+  h1{color:#7c3aed}a{color:#7c3aed}code{background:#2a2a4a;padding:2px 6px;border-radius:4px;font-size:0.9em}
+  .status{margin:1.5rem 0;padding:1rem;border-radius:8px;background:#2a2a4a;border-left:4px solid #7c3aed}
+  .endpoint{margin:0.25rem 0}
+</style>
+</head>
+<body>
+<h1>GitNexus Server</h1>
+<div class="status">
+  <strong>API is running</strong>
+  <p class="endpoint"><a href="/api/info">/api/info</a> — Server version &amp; context</p>
+  <p class="endpoint"><a href="/api/repos">/api/repos</a> — Indexed repositories</p>
+  <p class="endpoint"><a href="/api/heartbeat">/api/heartbeat</a> — SSE heartbeat</p>
+  <p class="endpoint"><code>/api/graph</code> <code>/api/query</code> <code>/api/search</code> — Data endpoints</p>
+  <p class="endpoint"><code>/api/mcp</code> — MCP over StreamableHTTP</p>
+</div>
+<h3>Web UI not found</h3>
+<p>The built web UI was not found. To enable it, build the frontend:</p>
+<pre><code>cd gitnexus-web && npm run build</code></pre>
+<p>Or use the deployed UI at <a href="https://gitnexus.vercel.app" target="_blank">gitnexus.vercel.app</a> — it connects to this server automatically.</p>
+</body>
+</html>`);
+    });
+  }
+
   // Global error handler — catch anything the route handlers miss
   app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     console.error('Unhandled error:', err);

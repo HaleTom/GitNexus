@@ -71,3 +71,19 @@ const cliEntry = path.join(DIST, 'cli', 'index.js');
 if (fs.existsSync(cliEntry)) fs.chmodSync(cliEntry, 0o755);
 
 console.log(`[build] done — rewrote ${rewritten} files.`);
+
+// ── 6. Build & copy web UI ──────────────────────────────────────────
+const WEB_ROOT = path.resolve(ROOT, '..', 'gitnexus-web');
+const WEB_DEST = path.join(DIST, '..', 'web');
+
+if (fs.existsSync(path.join(WEB_ROOT, 'package.json'))) {
+  console.log('[build] building gitnexus-web…');
+  execSync('npx tsc -b && npx vite build', { cwd: WEB_ROOT, stdio: 'inherit' });
+
+  // Copy dist → gitnexus/web/ (shipped in the npm package)
+  fs.rmSync(WEB_DEST, { recursive: true, force: true });
+  fs.cpSync(path.join(WEB_ROOT, 'dist'), WEB_DEST, { recursive: true });
+  console.log('[build] copied web UI → gitnexus/web/');
+} else {
+  console.log('[build] skipping web UI (gitnexus-web not found)');
+}
