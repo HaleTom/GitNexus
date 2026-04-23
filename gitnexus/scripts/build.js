@@ -76,7 +76,11 @@ const WEB_DEST = path.join(DIST, '..', 'web');
 
 if (fs.existsSync(path.join(WEB_ROOT, 'package.json'))) {
   console.log('[build] building gitnexus-web…');
-  execSync('npx tsc -b && npx vite build', { cwd: WEB_ROOT, stdio: 'inherit' });
+  if (!fs.existsSync(path.join(WEB_ROOT, 'node_modules'))) {
+    console.log('[build] installing gitnexus-web dependencies…');
+    execSync('npm install', { cwd: WEB_ROOT, stdio: 'inherit' });
+  }
+  execSync('npm run build', { cwd: WEB_ROOT, stdio: 'inherit' });
 
   // Copy dist → gitnexus/web/ (shipped in the npm package)
   fs.rmSync(WEB_DEST, { recursive: true, force: true });
