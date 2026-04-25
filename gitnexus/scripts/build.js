@@ -21,11 +21,11 @@ const SHARED_DEST = path.join(DIST, '_shared');
 
 // ── 1. Build gitnexus-shared ───────────────────────────────────────
 console.log('[build] compiling gitnexus-shared…');
-execSync('npx tsc', { cwd: SHARED_ROOT, stdio: 'inherit' });
+execSync('npx tsc', { cwd: SHARED_ROOT, stdio: 'inherit', timeout: 120_000 });
 
 // ── 2. Build gitnexus ──────────────────────────────────────────────
 console.log('[build] compiling gitnexus…');
-execSync('npx tsc', { cwd: ROOT, stdio: 'inherit' });
+execSync('npx tsc', { cwd: ROOT, stdio: 'inherit', timeout: 120_000 });
 
 // ── 3. Copy shared dist ────────────────────────────────────────────
 console.log('[build] copying shared module into dist/_shared…');
@@ -78,9 +78,9 @@ if (fs.existsSync(path.join(WEB_ROOT, 'package.json'))) {
   console.log('[build] building gitnexus-web…');
   if (!fs.existsSync(path.join(WEB_ROOT, 'node_modules'))) {
     console.log('[build] installing gitnexus-web dependencies…');
-    execSync('npm install', { cwd: WEB_ROOT, stdio: 'inherit' });
+    execSync('npm ci', { cwd: WEB_ROOT, stdio: 'inherit', timeout: 120_000 });
   }
-  execSync('npm run build', { cwd: WEB_ROOT, stdio: 'inherit' });
+  execSync('npm run build', { cwd: WEB_ROOT, stdio: 'inherit', timeout: 120_000 });
 
   // Copy dist → gitnexus/web/ (shipped in the npm package)
   fs.rmSync(WEB_DEST, { recursive: true, force: true });
