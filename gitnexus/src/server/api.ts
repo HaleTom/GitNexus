@@ -133,7 +133,9 @@ export const resolveWebDistDir = async (
   primaryDir: string,
   fallbackDir: string,
 ): Promise<string | null> => {
-  for (const dir of [primaryDir, fallbackDir]) {
+  const envDir = process.env.GITNEXUS_WEB_DIST;
+  const dirs = envDir ? [envDir, primaryDir, fallbackDir] : [primaryDir, fallbackDir];
+  for (const dir of dirs) {
     try {
       await fs.access(path.join(dir, 'index.html'));
       return dir;

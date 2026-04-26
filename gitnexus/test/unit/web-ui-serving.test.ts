@@ -1,5 +1,4 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import type * as fsType from 'node:fs/promises';
 
 const { accessMock } = vi.hoisted(() => ({
   accessMock: vi.fn(),
@@ -23,7 +22,9 @@ const createMockApp = (): MockApp => {
   const _routes: MockRoute[] = [];
   return {
     use: vi.fn(),
-    get: vi.fn((p: string | RegExp, ...h: Function[]) => _routes.push({ method: 'get', path: p, handler: h })),
+    get: vi.fn((p: string | RegExp, ...h: Function[]) =>
+      _routes.push({ method: 'get', path: p, handler: h }),
+    ),
     _routes,
   };
 };
@@ -155,7 +156,11 @@ describe('registerWebUI', () => {
   it('Cache-Control setHeaders sets no-cache for HTML, immutable for assets', () => {
     const setHeaders = (filePath: string) => {
       const headers: Record<string, string> = {};
-      const res = { setHeader: (k: string, v: string) => { headers[k] = v; } };
+      const res = {
+        setHeader: (k: string, v: string) => {
+          headers[k] = v;
+        },
+      };
       if (filePath.endsWith('.html')) {
         res.setHeader('Cache-Control', 'no-cache');
       } else {
@@ -164,8 +169,12 @@ describe('registerWebUI', () => {
       return headers;
     };
     expect(setHeaders('index.html')).toEqual({ 'Cache-Control': 'no-cache' });
-    expect(setHeaders('app.js')).toEqual({ 'Cache-Control': 'public, max-age=31536000, immutable' });
-    expect(setHeaders('style.css')).toEqual({ 'Cache-Control': 'public, max-age=31536000, immutable' });
+    expect(setHeaders('app.js')).toEqual({
+      'Cache-Control': 'public, max-age=31536000, immutable',
+    });
+    expect(setHeaders('style.css')).toEqual({
+      'Cache-Control': 'public, max-age=31536000, immutable',
+    });
   });
 });
 
@@ -215,5 +224,45 @@ describe('resolveWebDistDir', () => {
       'permission denied',
     );
     warnSpy.mockRestore();
+  });
+
+  it('prefers GITNEXUS_WEB_DIST env var when set', async () => {
+    const original = process.env.GITNEXUS_WEB_DIST;
+    process.env.GITNEXUS_WEB_DIST = '/env/dist';
+    try {
+      accessMock.mockImplementation(async (p: string) => {
+        if (p.includes('/env/dist')) return undefined;
+        throw Object.assign(new Error('not found'), { code: 'ENOENT' });
+      });
+      const result = await resolveWebDistDir('/primary', '/fallback');
+      expect(result).toBe('/env/dist');
+    } finally {
+      if (original === undefined) {
+        delete process.env.GITNEXUS_WEB_DIST;
+      } else {
+        process.env.GITNEXUS_WEB_DIST = original;
+      }
+    }
+  });
+
+  it('falls back to primary when GITNEXUS_WEB_DIST dir missing', async () => {
+    const original = process.env.GITNEXUS_WEB_DIST;
+    process.env.GITNEXUS_WEB_DIST = '/env/dist';
+    try {
+      accessMock.mockImplementation(async (p: string) => {
+        if (p.includes('/env/dist'))
+          throw Object.assign(new Error('not found'), { code: 'ENOENT' });
+        if (p.includes('primary')) return undefined;
+        throw Object.assign(new Error('not found'), { code: 'ENOENT' });
+      });
+      const result = await resolveWebDistDir('/primary', '/fallback');
+      expect(result).toBe('/primary');
+    } finally {
+      if (original === undefined) {
+        delete process.env.GITNEXUS_WEB_DIST;
+      } else {
+        process.env.GITNEXUS_WEB_DIST = original;
+      }
+    }
   });
 });
