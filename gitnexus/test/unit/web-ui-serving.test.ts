@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 const { accessMock } = vi.hoisted(() => ({
@@ -231,7 +232,8 @@ describe('resolveWebDistDir', () => {
     process.env.GITNEXUS_WEB_DIST = '/env/dist';
     try {
       accessMock.mockImplementation(async (p: string) => {
-        if (p.includes('/env/dist')) return undefined;
+        const normalized = p.split(path.sep).join('/');
+        if (normalized.includes('/env/dist')) return undefined;
         throw Object.assign(new Error('not found'), { code: 'ENOENT' });
       });
       const result = await resolveWebDistDir('/primary', '/fallback');
@@ -250,9 +252,10 @@ describe('resolveWebDistDir', () => {
     process.env.GITNEXUS_WEB_DIST = '/env/dist';
     try {
       accessMock.mockImplementation(async (p: string) => {
-        if (p.includes('/env/dist'))
+        const normalized = p.split(path.sep).join('/');
+        if (normalized.includes('/env/dist'))
           throw Object.assign(new Error('not found'), { code: 'ENOENT' });
-        if (p.includes('primary')) return undefined;
+        if (normalized.includes('/primary')) return undefined;
         throw Object.assign(new Error('not found'), { code: 'ENOENT' });
       });
       const result = await resolveWebDistDir('/primary', '/fallback');
