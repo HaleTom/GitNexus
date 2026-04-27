@@ -1,4 +1,6 @@
 import path from 'node:path';
+import http from 'node:http';
+import express from 'express';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 const { accessMock } = vi.hoisted(() => ({
@@ -10,7 +12,13 @@ vi.mock('fs/promises', () => ({
   access: accessMock,
 }));
 
-import { registerWebUI, resolveWebDistDir, landingPageHtml } from '../../src/server/api.js';
+import {
+  registerWebUI,
+  resolveWebDistDir,
+  landingPageHtml,
+  SPA_FALLBACK_REGEX,
+  staticCacheControlSetHeaders,
+} from '../../src/server/api.js';
 
 type MockRoute = { method: string; path: string | RegExp; handler: Function[] };
 type MockApp = {
@@ -87,41 +95,39 @@ describe('landingPageHtml', () => {
 });
 
 describe('SPA fallback regex', () => {
-  const regex = /^(?!\/api(?:\/|$))(?!.*\.\w{1,10}$).*/;
-
   it('allows root path', () => {
-    expect(regex.test('/')).toBe(true);
+    expect(SPA_FALLBACK_REGEX.test('/')).toBe(true);
   });
 
   it('allows SPA routes', () => {
-    expect(regex.test('/processes')).toBe(true);
-    expect(regex.test('/settings')).toBe(true);
-    expect(regex.test('/clusters')).toBe(true);
+    expect(SPA_FALLBACK_REGEX.test('/processes')).toBe(true);
+    expect(SPA_FALLBACK_REGEX.test('/settings')).toBe(true);
+    expect(SPA_FALLBACK_REGEX.test('/clusters')).toBe(true);
   });
 
   it('excludes /api paths', () => {
-    expect(regex.test('/api')).toBe(false);
-    expect(regex.test('/api/')).toBe(false);
-    expect(regex.test('/api/info')).toBe(false);
-    expect(regex.test('/api/does-not-exist')).toBe(false);
+    expect(SPA_FALLBACK_REGEX.test('/api')).toBe(false);
+    expect(SPA_FALLBACK_REGEX.test('/api/')).toBe(false);
+    expect(SPA_FALLBACK_REGEX.test('/api/info')).toBe(false);
+    expect(SPA_FALLBACK_REGEX.test('/api/does-not-exist')).toBe(false);
   });
 
   it('excludes asset-like paths with file extensions', () => {
-    expect(regex.test('/assets/missing.js')).toBe(false);
-    expect(regex.test('/assets/missing.css')).toBe(false);
-    expect(regex.test('/favicon.ico')).toBe(false);
-    expect(regex.test('/assets/font.woff2')).toBe(false);
-    expect(regex.test('/static/app.map')).toBe(false);
-    expect(regex.test('/images/logo.png')).toBe(false);
+    expect(SPA_FALLBACK_REGEX.test('/assets/missing.js')).toBe(false);
+    expect(SPA_FALLBACK_REGEX.test('/assets/missing.css')).toBe(false);
+    expect(SPA_FALLBACK_REGEX.test('/favicon.ico')).toBe(false);
+    expect(SPA_FALLBACK_REGEX.test('/assets/font.woff2')).toBe(false);
+    expect(SPA_FALLBACK_REGEX.test('/static/app.map')).toBe(false);
+    expect(SPA_FALLBACK_REGEX.test('/images/logo.png')).toBe(false);
   });
 
   it('allows SPA routes with dots not at the end', () => {
-    expect(regex.test('/v1.0/api')).toBe(true);
-    expect(regex.test('/docs/v2.0/guide')).toBe(true);
+    expect(SPA_FALLBACK_REGEX.test('/v1.0/api')).toBe(true);
+    expect(SPA_FALLBACK_REGEX.test('/docs/v2.0/guide')).toBe(true);
   });
 
   it('excludes paths ending in dot-plus-extension regardless of content before it', () => {
-    expect(regex.test('/user@example.com')).toBe(false);
+    expect(SPA_FALLBACK_REGEX.test('/user@example.com')).toBe(false);
   });
 });
 
@@ -132,7 +138,7 @@ describe('registerWebUI', () => {
     expect(app.use).toHaveBeenCalledTimes(1);
     expect(app.get).toHaveBeenCalledTimes(1);
     const [regex] = app.get.mock.calls[0] as [RegExp, ...Function[]];
-    expect(regex.source).toBe(/^(?!\/api(?:\/|$))(?!.*\.\w{1,10}$).*/.source);
+    expect(regex.source).toBe(SPA_FALLBACK_REGEX.source);
   });
 
   it('registers landing page route when staticDir is null', () => {
@@ -155,25 +161,21 @@ describe('registerWebUI', () => {
   });
 
   it('Cache-Control setHeaders sets no-cache for HTML, immutable for assets', () => {
-    const setHeaders = (filePath: string) => {
+    const captureHeaders = (filePath: string) => {
       const headers: Record<string, string> = {};
       const res = {
         setHeader: (k: string, v: string) => {
           headers[k] = v;
         },
       };
-      if (filePath.endsWith('.html')) {
-        res.setHeader('Cache-Control', 'no-cache');
-      } else {
-        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-      }
+      staticCacheControlSetHeaders(res as express.Response, filePath);
       return headers;
     };
-    expect(setHeaders('index.html')).toEqual({ 'Cache-Control': 'no-cache' });
-    expect(setHeaders('app.js')).toEqual({
+    expect(captureHeaders('index.html')).toEqual({ 'Cache-Control': 'no-cache' });
+    expect(captureHeaders('app.js')).toEqual({
       'Cache-Control': 'public, max-age=31536000, immutable',
     });
-    expect(setHeaders('style.css')).toEqual({
+    expect(captureHeaders('style.css')).toEqual({
       'Cache-Control': 'public, max-age=31536000, immutable',
     });
   });
@@ -267,5 +269,52 @@ describe('resolveWebDistDir', () => {
         process.env.GITNEXUS_WEB_DIST = original;
       }
     }
+  });
+});
+
+describe('Real Express dispatch — API and asset isolation', () => {
+  const makeRequest = (app: express.Express, method: string, url: string): Promise<number> => {
+    return new Promise((resolve) => {
+      const server = app.listen(0, () => {
+        const opts = {
+          hostname: 'localhost',
+          port: (server.address() as any).port,
+          method,
+          path: url,
+        };
+        const req = http.request(opts, (res) => {
+          server.close();
+          resolve(res.statusCode ?? 0);
+        });
+        req.on('error', () => {
+          server.close();
+          resolve(0);
+        });
+        req.end();
+      });
+    });
+  };
+
+  it('GET /api/does-not-exist returns 404, not SPA HTML', async () => {
+    const app = express();
+    app.get('/api/info', (_req, res) => res.json({ ok: true }));
+    registerWebUI(app, '/nonexistent');
+    const status = await makeRequest(app, 'GET', '/api/does-not-exist');
+    expect(status).toBe(404);
+  });
+
+  it('GET /assets/missing.js returns 404, not SPA HTML', async () => {
+    const app = express();
+    app.get('/api/info', (_req, res) => res.json({ ok: true }));
+    registerWebUI(app, '/nonexistent');
+    const status = await makeRequest(app, 'GET', '/assets/missing.js');
+    expect(status).toBe(404);
+  });
+
+  it('GET / returns the landing page when no web build exists', async () => {
+    const app = express();
+    registerWebUI(app, null);
+    const status = await makeRequest(app, 'GET', '/');
+    expect(status).toBe(200);
   });
 });

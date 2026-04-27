@@ -127,7 +127,7 @@ export const isIgnorableGraphQueryError = (err: unknown): boolean => {
   );
 };
 
-const SPA_FALLBACK_REGEX = /^(?!\/api(?:\/|$))(?!.*\.\w{1,10}$).*/;
+export const SPA_FALLBACK_REGEX = /^(?!\/api(?:\/|$))(?!.*\.\w{1,10}$).*/;
 
 export const resolveWebDistDir = async (
   primaryDir: string,
@@ -197,17 +197,19 @@ a.ext:hover{text-decoration:underline}
 </body>
 </html>`;
 
+export const staticCacheControlSetHeaders = (res: express.Response, filePath: string): void => {
+  if (filePath.endsWith('.html')) {
+    res.setHeader('Cache-Control', 'no-cache');
+  } else {
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  }
+};
+
 export const registerWebUI = (app: express.Express, staticDir: string | null): void => {
   if (staticDir) {
     app.use(
       express.static(staticDir, {
-        setHeaders: (res, filePath) => {
-          if (filePath.endsWith('.html')) {
-            res.setHeader('Cache-Control', 'no-cache');
-          } else {
-            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-          }
-        },
+        setHeaders: staticCacheControlSetHeaders,
       }),
     );
     // ⚠ This must remain the LAST route before the global error handler.
@@ -1690,5 +1692,18 @@ export const createServer = async (port: number, host: string = '127.0.0.1') => 
     };
     process.once('SIGINT', shutdown);
     process.once('SIGTERM', shutdown);
+
+    // Catch-all crash guards (mirrors startMCPServer in mcp/server.ts)
+    let shuttingDown = false;
+    process.on('uncaughtException', (err) => {
+      console.error('GitNexus uncaughtException:', err?.stack || err);
+      if (!shuttingDown) {
+        shuttingDown = true;
+        shutdown().catch(() => {});
+      }
+    });
+    process.on('unhandledRejection', (reason: any) => {
+      console.error('GitNexus unhandledRejection:', reason?.stack || reason);
+    });
   });
 };
